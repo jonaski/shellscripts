@@ -35,7 +35,7 @@ emailfrom="nobody"
 emailto="root"
 options="-o ConnectTimeout=${connecttimeout}"
 
-servers="
+hosts="
 server1 rsyslog sshd named sendmail saslauthd spfmilter opendkim opendmarc milter-regex spamd dovecot apache
 server2 rsyslog sshd named sendmail saslauthd spfmilter opendkim opendmarc apache
 server3 rsyslog sshd named sendmail saslauthd spfmilter opendkim opendmarc milter-regex mailscanner clamd
@@ -167,7 +167,7 @@ cmdcheck() {
 
   debug "cmdcheck()"
   
-  cmds="which cat cut tr sed grep bc cp mv rm mkdir date hostname mail ssh tput curl ping mutt"
+  cmds="which cat cut tr sed grep bc cp mv rm mkdir date hostname mail ssh tput ping mutt"
   for cmd in $cmds
   do
     which $cmd >/dev/null 2>&1
@@ -245,17 +245,17 @@ serviceswatch() {
   i=0
   IFS_DEFAULT=$IFS
   IFS=$'\n'
-  for l in ${servers}
+  for l in ${hosts}
   do
     IFS=$IFS_DEFAULT
     if [ "$l" = "" ]; then
       continue
     fi
     
-    server=$(echo $l | awk '{ print $1}')
+    host=$(echo $l | awk '{ print $1}')
     services=$(echo "$l" | cut -d ' ' -f2-)
     
-    status "Server: $server - Services: $services"
+    status "Host: $host - Services: $services"
     
     status=
     fail=0
@@ -266,7 +266,7 @@ serviceswatch() {
     
     for service in $services
     do
-      ssh $options $server systemctl status $service >/dev/null 2>&1
+      ssh $options $host systemctl status $service >/dev/null 2>&1
       if [ $? -eq 0 ]; then # Service is up
         status="up"
       elif [ $? = 3 ]; then # Service is down
@@ -288,12 +288,12 @@ serviceswatch() {
 	  failtime=$(date +%s)
 	fi
       fi
-      status "Server: $server - Service: $service - Status: $status"
+      status "Host: $host - Service: $service - Status: $status"
       servicesstatus_add
     done
 
     servicesdata="$servicesdata
-Server: $server - ${services_status_html}<br />"
+Host: $host - ${services_status_html}<br />"
 
     writefile
     
@@ -313,7 +313,7 @@ readfile() {
   entrytime=0
   entry_services_status=
 
-  entry=$(grep -i "^${server} .*" ${tmpfile})
+  entry=$(grep -i "^${host} .*" ${tmpfile})
   if [ "$entry" = "" ]; then
     return
   fi
@@ -361,6 +361,10 @@ readfile() {
     return
   fi
   
+  timenow=$(date +%s)
+  time=$(echo $timenow - $entrytime | bc)
+  debug "Entry with timestamp \"${entrytime}\" ($(date -u -d @${time} +"%T") ago) found for host \"$host\". CPUPrevStatus: $cpuprevstatus CPUFailTime: $cpufailtime MemPrevStatus: $memprevstatus MemFailTime: $memfailtime HDDPrevStatus: $hddprevstatus HDDFailTime: $hddfailtime ReportTime: $reporttime."
+  
   debug "readfile() finished"
 
 }
@@ -393,7 +397,7 @@ writefile() {
 
   debug "writefile()"
   
-  echo "$entry" | grep -i "^${server} ${services_status} .*" >/dev/null 2>&1
+  echo "$entry" | grep -i "^${host} ${services_status} .*" >/dev/null 2>&1
   if [ $? -eq 0 ]; then
     changed=0
   else
@@ -404,23 +408,23 @@ writefile() {
   failtime_bc=$(echo $timenow - $failtime | bc)
   reporttime_bc=$(echo $timenow - $reporttime | bc)
 
-  debug "Server: ${server} - Changed=$changed"
+  debug "Host: ${host} - Changed=$changed"
 
   if [ "$entry" = "" ]; then
     entrytime=$(date +%s)
-    summary_add "Report sent because this is the first services watch for \"$server\"."
+    summary_add "This is the first services watch for \"$host\"."
     sendreport=1
     reporttime=$timenow
   elif [ "$fail" -eq 1 ] && [ "$failtime_bc" -ge "$maxfailtime" ]; then
     entryfail=1
     if [ "$reporttime_bc" -ge "$reportfreq" ]; then
-      summary_add "Report sent because one or more services failed on \"$server\" for more than $(date -u -d @$maxfailtime +"%T")."
+      summary_add "One or more services on \"$host\" failed for more than $(date -u -d @$maxfailtime +"%T")."
       sendreport=1
       reporttime=$timenow
     fi
   elif [ "$fail" -eq 0 ] && [ "$entryfail" -eq 1 ]; then
     entryfail=0
-    summary_add "Report sent because \"$server\" restored from one or more failed services."
+    summary_add "\"$host\" restored from one or more failed services."
     failtime=0
     sendreport=1
     reporttime=$timenow
@@ -435,9 +439,9 @@ writefile() {
     entrytime=$(date +%s)
   fi
 
-  sed -i "s/^${server} .*$//g" ${tmpfile}
+  sed -i "s/^${host} .*$//g" ${tmpfile}
   sed -i '/^$/d' ${tmpfile}
-  echo "${server} ${services_status} ${entryfail} ${failtime} ${reporttime} ${entrytime}" >>${tmpfile}
+  echo "${host} ${services_status} ${entryfail} ${failtime} ${reporttime} ${entrytime}" >>${tmpfile}
 
   debug "writefile() finished"
 
@@ -493,7 +497,7 @@ sendreport() {
   report_add "</html>"
 
   LANG=en_GB
-  EMAIL=$emailfrom mutt -e 'set content_type=text/html' -s "Server Monitor Services Watch" $emailto <<EOT
+  EMAIL=$emailfrom mutt -e 'set content_type=text/html' -s "Monitor Services Watch" $emailto <<EOT
   $reportdata
 EOT
 

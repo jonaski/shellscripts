@@ -34,7 +34,7 @@ reportfreq=120
 emailfrom="nobody"
 emailto="root"
 
-servers="
+hosts="
 server1 ssh/tcp domain/udp domain/tcp smtp/tcp imaps/tcp pop3s/tcp http/tcp https/tcp
 server2 ssh/tcp domain/udp domain/tcp smtp/tcp http/tcp https/tcp
 server3 ssh/tcp domain/udp domain/tcp smtp/tcp
@@ -166,7 +166,7 @@ cmdcheck() {
 
   debug "cmdcheck()"
 
-  cmds="which cat cut tr sed grep bc cp mv rm mkdir date hostname mail ssh tput ping curl mutt"
+  cmds="which cat cut tr sed grep bc cp mv rm mkdir date hostname ssh tput ping nc mutt"
   for cmd in $cmds
   do
     which $cmd >/dev/null 2>&1
@@ -244,38 +244,38 @@ portswatch() {
   i=0
   IFS_DEFAULT=$IFS
   IFS=$'\n'
-  for l in ${servers}
+  for l in ${hosts}
   do
     IFS=$IFS_DEFAULT
     if [ "$l" = "" ]; then
       continue
     fi
-    server=$(echo $l | awk '{ print $1}')
+    host=$(echo $l | awk '{ print $1}')
     ports=$(echo "$l" | cut -d ' ' -f2-)
     status=
     fail=0
     ports_status=
     ports_status_html=
-    debug "Server: ${server} - Ports: $ports"
+    debug "Host: $host - Ports: $ports"
     readfile
     for portent in $ports
     do
       port=$(echo "$portent" | cut -d '/' -f1)
       protocol=$(echo "$portent" | cut -d '/' -f2)
-      status "Checking server: ${server} - Port: $portent"
+      status "Checking host: $host - port: $portent"
       if [ "$protocol" = "tcp" ]; then
-        nc -zw ${connecttimeout} ${server} $port
+        nc -zw ${connecttimeout} $host $port
       elif [ $protocol = "udp" ]; then
-        nc -zuw ${connecttimeout} ${server} $port
+        nc -zuw ${connecttimeout} $host $port
       else
         continue
       fi
       if [ $? -eq 0 ]; then # Port is up
         status="up"
-	status "Server: ${server} - Port: $portent - Status: Up"
+	status "Host: $host - Port: $portent - Status: Up"
       else
         status="down"
-        status "Server: ${server} - Port: $portent - Status: Down"
+        status "Host: $host - Port: $portent - Status: Down"
         fail=1
 	if [ "$failtime" -le 1 ]; then
 	  failtime=$(date +%s)
@@ -285,7 +285,7 @@ portswatch() {
     done
 
     portswatchdata="$portswatchdata
-Server: ${server} - ${ports_status_html} <br />"
+Host: $host - ${ports_status_html} <br />"
     
     writefile
   done
@@ -304,7 +304,7 @@ readfile() {
   entrytime=0
   entry_ports_status=
 
-  entry=$(grep -i "^${server} .*" ${tmpfile})
+  entry=$(grep -i "^$host .*" ${tmpfile})
   if [ "$entry" = "" ]; then
     return
   fi
@@ -387,7 +387,7 @@ writefile() {
   debug "ports_status_____ : $ports_status"
   debug "entry_ports_status: $entry_ports_status"
   
-  echo "$entry" | grep -i "^${server} ${ports_status} .*" >/dev/null 2>&1
+  echo "$entry" | grep -i "^$host ${ports_status} .*" >/dev/null 2>&1
   if [ $? -eq 0 ]; then
     changed=0
   else
@@ -398,23 +398,23 @@ writefile() {
   failtime_bc=$(echo $timenow - $failtime | bc)
   reporttime_bc=$(echo $timenow - $reporttime | bc)
 
-  debug "Server: ${server} - Changed=$changed"
+  debug "Host: $host - Changed=$changed"
 
   if [ "$entry" = "" ]; then
     entrytime=$(date +%s)
-    summary_add "Report sent because this is the first ports watch for \"$server\"."
+    summary_add "This is the first ports watch for \"$host\"."
     sendreport=1
     reporttime=$timenow
   elif [ "$fail" -eq 1 ] && [ "$failtime_bc" -ge "$maxfailtime" ]; then
     entryfail=1
     if [ "$reporttime_bc" -ge "$reportfreq" ]; then
-      summary_add "Report sent because one or more ports failed on \"$server\" for more than $(date -u -d @$maxfailtime +"%T")."
+      summary_add "One or more ports on \"$host\" failed for more than $(date -u -d @$maxfailtime +"%T")."
       sendreport=1
       reporttime=$timenow
     fi
   elif [ "$fail" -eq 0 ] && [ "$entryfail" -eq 1 ]; then
     entryfail=0
-    summary_add "Report sent because \"$server\" restored from one or more failed ports."
+    summary_add "\"$host\" restored from one or more failed ports."
     failtime=0
     sendreport=1
     reporttime=$timenow
@@ -429,12 +429,12 @@ writefile() {
     entrytime=$(date +%s)
   fi
 
-  sed -i "s/^${server} .*$//g" ${tmpfile}
+  sed -i "s/^${host} .*$//g" ${tmpfile}
   sed -i '/^$/d' ${tmpfile}
-  echo "${server} ${ports_status} ${entryfail} ${failtime} ${reporttime} ${entrytime}" >>${tmpfile}
+  echo "${host} ${ports_status} ${entryfail} ${failtime} ${reporttime} ${entrytime}" >>${tmpfile}
 
   debug "writefile() finished"
-  
+
 }
 
 summary_add() {
@@ -470,7 +470,6 @@ sendreport() {
   scripttime=$(echo $scriptend - $scriptstart | bc)
   reporttime=$(date +%s)
 
-#EMAIL=$emailfrom mutt -e 'set content_type=text/html' -s "Server Monitor Ports Watch" $emailto
   report_add "<html>"
   report_add "<body>"
   report_add "<h1>Monitor Ports Watch</h1>"
