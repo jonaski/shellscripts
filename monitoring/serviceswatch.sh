@@ -318,6 +318,10 @@ readfile() {
     return
   fi
   entry_services_status=$(echo $entry | cut -d' ' -f2)
+  if [ "$entry_services_status" = "" ]; then
+    entry=
+    return
+  fi
 
   entryfail=$(echo $entry | cut -d' ' -f3)
   if [ "$entryfail" = "" ] || ! isnum "$entryfail"; then
@@ -466,7 +470,7 @@ sendreport() {
   debug "sendreport()"
 
   status "Sending monitor services watch report..."
-  
+
   scriptend=$(date +%s)
   scripttime=$(echo $scriptend - $scriptstart | bc)
   reporttime=$(date +%s)

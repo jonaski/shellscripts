@@ -26,11 +26,12 @@ tmpfile="/tmp/webwatch.tmp"
 logfile="/tmp/webwatch.log"
 log=1
 debug=1
+inettesthosts="8.8.8.8 8.8.4.4"			# Test all of these, only if 1 fails internet is reported to be down.
+pingtimeout=2
+maxfailtime=1
+reportfreq=120
 emailfrom="nobody"
 emailto="root"
-emailevery=120
-pingtimeout=2
-inettesthosts="8.8.8.8 8.8.4.4"
 
 websites="
 http://www.jkvinge.net/ <address>Apache Server at www.jkvinge.net Port 80</address>
@@ -83,12 +84,6 @@ debug() {
   fi
 }
 
-exit_safe() {
-  debug "exit_safe()"
-  rm -f $lockfile
-  exit $?
-}
-
 isnum() {
   echo "$1" | grep -E '^\-?[0-9]+$' >/dev/null 2>&1
   return $?
@@ -107,6 +102,63 @@ loadconfig() {
 
 }
 
+main() {
+
+  init $@
+  
+  cmdcheck
+  inetstatus
+  webwatch
+  
+  if [ "$sendreport" = "1" ]; then
+    sendreport
+  fi
+
+  scriptend=$(date +%s)
+  scripttime=$(echo $scriptend - $scriptstart | bc)
+  status "Script finished in $(date -u -d @${scripttime} +"%T")"
+  
+  exit_safe 0
+
+}
+
+init() {
+
+  scriptstart=$(date +%s)
+  havelockfile=0
+  
+  status "Monitor Web Watch - Starting - $0"
+
+  loadconfig
+
+  if [ -f "$lockfile" ]; then
+    error "Script is already running. If this is incorrect, remove: $lockfile."
+    exit_safe
+  fi
+  which lockfile >/dev/null 2>&1
+  if [ $? -eq 0 ] ; then
+    lockfile -r 0 -l $lockfilettl $lockfile || { exit_safe 1; }
+  else
+    touch $lockfile || { exit_safe 1; }
+  fi
+  havelockfile=1
+
+  touch $tmpfile || exit_safe 1
+  touch $logfile || exit_safe 1
+
+}
+
+exit_safe() {
+
+  debug "exit_safe()"
+  
+  if [ "$havelockfile" -eq 1 ]; then
+    rm -f $lockfile
+  fi
+
+  exit $?
+}
+
 #  Check that we got all the needed commands
 
 cmdcheck() {
@@ -122,7 +174,7 @@ cmdcheck() {
       exit_safe 1
     fi
   done
-  
+
   debug "cmdcheck() finished"
 
 }
@@ -206,32 +258,41 @@ webwatch() {
       continue
     fi
     readfile
-    status=""
-    result=""
+    status=
+    result=
+    fail=0
     output=$(curl -sSf --insecure $url 2>&1)
     if ! [ $? -eq 0 ]; then
       exitstatus=$?
-      status=down
+      status="down"
       result=$(echo $output | sed 's/curl: (.*) //g')
       result_html="<font color=\"red\">${result} <br /> ${exitstatus}</font>"
       fail=1
+      if [ "$failtime" -le 1 ]; then
+	failtime=$(date +%s)
+      fi
     else
       curl -sSf --insecure $url | grep -i "$match" >/dev/null 2>&1
       if [ $? -eq 0 ]; then
-        status=up
+        status="up"
         result="Up and running"
         result_html="<font color=\"green\">Up and running</font>"
+        fail=0
       else
-        status=down
+        status="down"
         result="Wrong content"
         result_html="<font color=\"red\">Wrong content</font>"
         fail=1
+	if [ "$failtime" -le 1 ]; then
+	  failtime=$(date +%s)
+	fi
       fi
     fi
-    status "Website: $url Result: $result"
-    statuscheck
+
+    status "Website: $url Status: $status Result: $result"
+
     writefile
-    
+
     maildata="$maildata
 Website: $url - ${result_html}<br />"
     
@@ -245,63 +306,132 @@ readfile() {
 
   debug "readfile()"
 
-  entry=$(grep -i "^Website: ${url}: Result: .* Time=.*" ${tmpfile})
+  entryfail=0
+  failtime=0
+  reporttime=0
+  entrytime=0
+  entrystatus=
+  entryresult=
+
+  entry=$(grep -i "^${url} .*" ${tmpfile})
   if [ "$entry" = "" ]; then
+    return
+  fi
+  entrystatus=$(echo $entry | cut -d' ' -f2)
+  if [ "$entrystatus" = "" ]; then
+    entry=
+    return
+  fi
+  
+  entryresult=$(echo $entry | cut -d' ' -f3)
+  if [ "$entryresult" = "" ]; then
+    entry=
+    entrystatus=
+    return
+  fi
+
+  entryfail=$(echo $entry | cut -d' ' -f4)
+  if [ "$entryfail" = "" ] || ! isnum "$entryfail"; then
+    entry=
+    entrystatus=
+    entryresult=
+    entryfail=0
+    return
+  fi
+
+  failtime=$(echo $entry | cut -d' ' -f5)
+  if [ "$failtime" = "" ] || ! isnum "$failtime"; then
+    entry=
+    entrystatus=
+    entryresult=
+    entryfail=0
+    failtime=0
+    return
+  fi
+
+  reporttime=$(echo $entry | cut -d' ' -f6)
+  if [ "$reporttime" = "" ] || ! isnum "$reporttime"; then
+    entry=
+    entrystatus=
+    entryresult=
+    entryfail=0
+    failtime=0
+    reporttime=0
+    return
+  fi
+
+  entrytime=$(echo $entry | cut -d' ' -f7)
+  if [ "$entrytime" = "" ] ||  ! isnum "$entrytime"; then
+    entry=
+    entrystatus=
+    entryresult=
+    entryfail=0
     entrytime=0
-    changed=1
-  else
-    entrytime=$(echo $entry | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
-    if [ "$entrytime" = "" ]; then
-      entrytime=0
-    fi
+    failtime=0
+    reporttime=0
+    return
   fi
   
   debug "readfile() finished"
   
 }
 
-statuscheck() {
-
-  debug "statuscheck()"
-
-  entrych=$(echo $entry | grep -i "^Website: ${url}: Result: ${result} Time=.*")
-  if [ "$entrych" = "" ]; then
-    changed=1
-  else
-    changed=0
-  fi
-  
-  debug "statuscheck() finished"
-
-}
-
 writefile() {
 
   debug "writefile()"
+  
+  result_nospace=$(echo "$result" | sed 's/ /_/g')
+  echo $entry | grep -i "^${url} ${status} .*" >/dev/null 2>&1
+  if [ $? -eq 0 ]; then
+    changed=0
+  else
+    changed=1
+  fi
+  debug "URL: ${url} - Changed=$changed"
 
   timenow=$(date +%s)
-  time=$(echo $timenow - $entrytime | bc)
+  failtime_bc=$(echo $timenow - $failtime | bc)
+  reporttime_bc=$(echo $timenow - $reporttime | bc)
 
-  if [ \( "$fail" = "1" -a "$time" -gt "$emailevery" \) -o "$changed" = "1" ]; then
-    sendreport=1
+  if [ "$entry" = "" ]; then
     entrytime=$(date +%s)
+    summary_add "This is the first web watch for \"$url\"."
+    sendreport=1
+    reporttime=$timenow
+  elif [ "$fail" -eq 1 ] && [ "$failtime_bc" -ge "$maxfailtime" ]; then
+    entryfail=1
+    if [ "$reporttime_bc" -ge "$reportfreq" ]; then
+      summary_add "URL \"$url\" failed for more than $(date -u -d @$maxfailtime +"%T")."
+      sendreport=1
+      reporttime=$timenow
+    fi
+  elif [ "$fail" -eq 0 ] && [ "$entryfail" -eq 1 ]; then
+    entryfail=0
+    summary_add "URL \"$url\" restored from failed state."
+    failtime=0
+    sendreport=1
+    reporttime=$timenow
   fi
-  
+
+  if [ "$fail" -eq 0 ]; then
+    entryfail=0
+    failtime=0
+  fi
+
   if [ "$entrytime" -le 0 ]; then
     entrytime=$(date +%s)
   fi
-  
-  sed -i "s/^Website: ${url2}: Result:.*$//g" $tmpfile
+
+  sed -i "s/^${url2} .*$//g" $tmpfile
   sed -i '/^$/d' $tmpfile
-  echo "Website: ${url}: Result: ${result} Time=$timenow" >>$tmpfile
-  
+  echo "${url} ${status} ${result_nospace} ${entryfail} ${failtime} ${reporttime} ${entrytime}" >>${tmpfile}
+
   debug "writefile() finished"
 
 }
 
 summary_add() {
 
-  #count_summary=$(echo $count_summary + 1 | bc)
   if [ "$summary" = "" ]; then
     summary="$1<br />"
   else
@@ -338,11 +468,14 @@ sendreport() {
   if ! [ "$inetwasdowntext" = "" ]; then
     report_add "<p>$inetwasdowntext</p>"
   fi
+  if ! [ "$summary" = "" ]; then
+    report_add "<p>$summary</p>"
+  fi
   report_add "<br />"
   report_add "Status:<br />"
   report_add "$maildata"
   report_add "<br />"
-  report_add "New report is sent every $(date -u -d @${emailevery} +"%T") if status is changed or there is an error."
+  report_add "New report is sent every $(date -u -d @${reportfreq} +"%T") if status is changed or there is an error."
 
   LANG=en_GB
   EMAIL=$emailfrom mutt -e 'set content_type=text/html' -s "Monitor Web Watch" $emailto <<EOT
@@ -353,24 +486,5 @@ EOT
 
 }
 
-status "Monitor Web Watch - Starting - $0"
-
-scriptstart=$(date +%s)
-
-loadconfig
-lockfile -r 0 -l 3600 $lockfile || exit 1
-touch $tmpfile || exit_safe 1
-touch $logfile || exit_safe 1
-
-cmdcheck
-inetstatus
-webwatch
-if [ "$sendreport" = "1" ]; then
-  sendreport
-fi
-
-scriptend=$(date +%s)
-scripttime=$(echo $scriptend - $scriptstart | bc)
-status "Script finished in $(date -u -d @${scripttime} +"%T")"
-
+main
 exit_safe 0

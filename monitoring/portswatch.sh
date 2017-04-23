@@ -309,7 +309,11 @@ readfile() {
     return
   fi
   entry_ports_status=$(echo $entry | cut -d' ' -f2)
-  
+  if [ "$entry_ports_status" = "" ]; then
+    entry=
+    return
+  fi
+
   entryfail=$(echo $entry | cut -d' ' -f3)
   if [ "$entryfail" = "" ] || ! isnum "$entryfail"; then
     entry=
