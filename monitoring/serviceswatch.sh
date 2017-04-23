@@ -363,7 +363,7 @@ readfile() {
   
   timenow=$(date +%s)
   time=$(echo $timenow - $entrytime | bc)
-  debug "Entry with timestamp \"${entrytime}\" ($(date -u -d @${time} +"%T") ago) found for host \"$host\". CPUPrevStatus: $cpuprevstatus CPUFailTime: $cpufailtime MemPrevStatus: $memprevstatus MemFailTime: $memfailtime HDDPrevStatus: $hddprevstatus HDDFailTime: $hddfailtime ReportTime: $reporttime."
+  debug "Entry with timestamp \"${entrytime}\" ($(date -u -d @${time} +"%T") ago) found for host \"$host\". Status: $entry_services_status Fail: $entryfail FailTime: $failtime ReportTime: $reporttime"
   
   debug "readfile() finished"
 

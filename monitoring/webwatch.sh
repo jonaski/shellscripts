@@ -372,6 +372,10 @@ readfile() {
     return
   fi
   
+  timenow=$(date +%s)
+  time=$(echo $timenow - $entrytime | bc)
+debug "Entry with timestamp \"${entrytime}\" ($(date -u -d @${time} +"%T") ago) found for URL \"$url\". Status: $entrystatus Result: $entryresult Fail: $entryfail FailTime: $failtime ReportTime: $reporttime"
+  
   debug "readfile() finished"
   
 }

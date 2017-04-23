@@ -84,6 +84,13 @@ debug() {
   fi
 }
 
+isnum() {
+
+  echo "$1" | grep -E '^\-?[0-9]+$' >/dev/null 2>&1
+  return $?
+
+}
+
 loadconfig() {
 
   if [ -f "$configfile" ]; then
@@ -121,7 +128,7 @@ init() {
 
   scriptstart=$(date +%s)
   havelockfile=0
-  
+
   status "Monitor Ports Watch - Starting - $0"
 
   loadconfig
@@ -152,12 +159,6 @@ exit_safe() {
   fi
 
   exit $?
-}
-
-isnum() {
-
-  echo "$1" | grep -E '^\-?[0-9]+$' >/dev/null 2>&1
-  return $?
 }
 
 #  Check that we got all the needed commands
@@ -351,6 +352,10 @@ readfile() {
     reporttime=0
     return
   fi
+
+  timenow=$(date +%s)
+  time=$(echo $timenow - $entrytime | bc)
+debug "Entry with timestamp \"${entrytime}\" ($(date -u -d @${time} +"%T") ago) found for host \"$host\". Status: $entry_ports_status Fail: $entryfail FailTime: $failtime ReportTime: $reporttime"
   
   debug "readfile() finished"
   
@@ -439,7 +444,6 @@ writefile() {
 
 summary_add() {
 
-  #count_summary=$(echo $count_summary + 1 | bc)
   if [ "$summary" = "" ]; then
     summary="$1<br />"
   else
