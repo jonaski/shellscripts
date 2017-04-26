@@ -280,9 +280,32 @@ syswatch() {
     if [ "$l" = "" ]; then
       continue
     fi
-    hostuh=$(echo $l | awk '{ print $1}')
-    user=$(echo $hostuh | cut -d'@' -f1)
-    host=$(echo $hostuh | cut -d'@' -f2)
+    uhp=$(echo $l | awk '{ print $1}')
+
+    echo $uhp | grep '.@.' >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      user=$(echo $uhp | cut -d'@' -f1)
+      hostport=$(echo $uhp | cut -d'@' -f2)
+    else
+      user=
+      hostport=$uhp
+    fi
+
+    echo $hostport | grep '.:.' >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      host=$(echo $hostport | cut -d':' -f1)
+      port=$(echo $hostport | cut -d':' -f2)
+      hostoptions="$options -p $port"
+    else
+      host=$hostport
+      port=22
+      hostoptions=$options
+    fi
+    if [ "$user" = "" ]; then
+      hostuh="${host}"
+    else
+      hostuh="${user}@${host}"
+    fi
 
     debug "Starting syswatch for \"$host\"."
 
@@ -299,7 +322,7 @@ syswatch() {
 
     hostchkcmds
 
-    sshresult=$(ssh $options $hostuh uname -a 2>&1)
+    sshresult=$(ssh $hostoptions $hostuh uname -a 2>&1)
     if [ $? -eq 0 ]; then
       uname=$sshresult
     else
@@ -349,7 +372,7 @@ hostchkcmds() {
   havedf=0
   havesar=0
 
-  sshresult=$(ssh $options $hostuh echo '$PATH' | sed 's/:/ /g')
+  sshresult=$(ssh $hostoptions $hostuh echo '$PATH' | sed 's/:/ /g')
   if [ $? -eq 0 ] ; then
     paths="$sshresult /opt/bin"
   else
@@ -367,13 +390,13 @@ hostchkcmds() {
     do
       cmdpath=$path/$cmd
 
-      ssh $options $hostuh test -x $cmdpath >/dev/null 2>&1
+      ssh $hostoptions $hostuh test -x $cmdpath >/dev/null 2>&1
       if ! [ $? -eq 0 ] ; then
         continue
       fi
 
       if [ "$cmd" = "free" ] && ! [ "$havefree" -eq 1 ]; then
-        sshresult=$(ssh $options $hostuh $cmdpath --version 2>&1 | head -n1)
+        sshresult=$(ssh $hostoptions $hostuh $cmdpath --version 2>&1 | head -n1)
         if [ $? -eq 0 ] ; then
           echo "$sshresult" | grep "^free from procps.*$" >/dev/null 2>&1
           if [ $? -eq 0 ] ; then
@@ -384,7 +407,7 @@ hostchkcmds() {
           fi
         fi
       elif [ "$cmd" = "df" ] && ! [ "$havedf" -eq 1 ]; then
-        #sshresult=$(ssh $options $hostuh $cmdpath --version 2>&1 | head -n1)
+        #sshresult=$(ssh $hostoptions $hostuh $cmdpath --version 2>&1 | head -n1)
         #if [ $? -eq 0 ] ; then
           #echo "$sshresult" | grep "^df (GNU coreutils) .*$" >/dev/null 2>&1
           #if [ $? -eq 0 ] ; then
@@ -439,7 +462,7 @@ cpuload() {
     return
   fi
 
-  sshresult=$(ssh $options $hostuh $SAR -P ALL 1 2 2>&1)
+  sshresult=$(ssh $hostoptions $hostuh $SAR -P ALL 1 2 2>&1)
   if ! [ $? -eq 0 ]; then
     text="SSH command failure for \"$host\": ${sshresult}"
     summary_add "$text"
@@ -538,7 +561,7 @@ memusage() {
     return
   fi
 
-  sshresult=$(ssh $options $hostuh $FREE -b 2>&1)
+  sshresult=$(ssh $hostoptions $hostuh $FREE -b 2>&1)
   if ! [ $? -eq 0 ]; then
     text="SSH command failure for \"$host\": ${sshresult}"
     summary_add "$text"
@@ -691,7 +714,7 @@ hddusage() {
     return
   fi
 
-  sshresult=$(ssh $options $hostuh $DF -h 2>&1)
+  sshresult=$(ssh $hostoptions $hostuh $DF -h 2>&1)
   if ! [ $? -eq 0 ]; then
     # Ignore DF command error, sometimes it returns error messages even if there are valid results.
     text="DF command failure for \"$host\": ${sshresult}"
@@ -923,7 +946,7 @@ writefile() {
     entrytime=$(date +%s)
   fi
 
-  sed -i "^${host} .*$/d" ${tmpfile}
+  sed -i "/^${host} .*$/d" ${tmpfile}
   timenow=$(date +%s)
   echo "${host} CPU=${cpustatus_check} CPUFailTime=${cpufailtime} Mem=${memstatus_check} MemFailTime=${memfailtime} HDD=${hddstatus_check} ${hddstatus_line} HDDFailTime=${hddfailtime} ReportTime=${reporttime} Time=${entrytime}" >>${tmpfile}
 
