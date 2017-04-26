@@ -204,8 +204,9 @@ inetstatus() {
     entry=$(grep -i "INETDOWN Time=.*" ${tmpfile})
     if ! [ "$entry" = "" ]; then
       inetwasdown=1
-      rm -f ${tmpfile} || exit_safe 1
-      touch ${tmpfile} || exit_safe 1
+      #rm -f ${tmpfile} || exit_safe 1
+      #touch ${tmpfile} || exit_safe 1
+      sed -i "/^INETDOWN .*$/d" ${tmpfile}
       timenow=$(date +%s)
       entrytime=$(echo $entry | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
       if isnum "$entrytime" ; then
@@ -255,6 +256,7 @@ portswatch() {
     ports=$(echo "$l" | cut -d ' ' -f2-)
     status=
     fail=0
+    failtime=0
     ports_status=
     ports_status_html=
     debug "Host: $host - Ports: $ports"
@@ -412,8 +414,8 @@ writefile() {
     reporttime=$timenow
   elif [ "$fail" -eq 1 ] && [ "$failtime_bc" -ge "$maxfailtime" ]; then
     entryfail=1
+    summary_add "One or more ports on \"$host\" failed for more than $(date -u -d @$maxfailtime +"%T")."
     if [ "$reporttime_bc" -ge "$reportfreq" ]; then
-      summary_add "One or more ports on \"$host\" failed for more than $(date -u -d @$maxfailtime +"%T")."
       sendreport=1
       reporttime=$timenow
     fi
@@ -434,8 +436,7 @@ writefile() {
     entrytime=$(date +%s)
   fi
 
-  sed -i "s/^${host} .*$//g" ${tmpfile}
-  sed -i '/^$/d' ${tmpfile}
+  sed -i "/^${host} .*$/d" ${tmpfile}
   echo "${host} ${ports_status} ${entryfail} ${failtime} ${reporttime} ${entrytime}" >>${tmpfile}
 
   debug "writefile() finished"

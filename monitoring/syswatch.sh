@@ -226,8 +226,9 @@ inetstatus() {
     entry=$(grep -i "INETDOWN Time=.*" ${tmpfile})
     if ! [ "$entry" = "" ]; then
       inetwasdown=1
-      rm -f ${tmpfile} || exit_safe 1
-      touch ${tmpfile} || exit_safe 1
+      #rm -f ${tmpfile} || exit_safe 1
+      #touch ${tmpfile} || exit_safe 1
+      sed -i "/^INETDOWN .*$/d" ${tmpfile}
       timenow=$(date +%s)
       entrytime=$(echo $entry | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
       if isnum "$entrytime" ; then
@@ -910,20 +911,19 @@ writefile() {
   if [ "$entry" = "" ]; then
     entrytime=$(date +%s)
     report=1
-  fi
-  if [ "$hostfail" -eq 1 ] && [ "$reporttime_bc" -ge "$reportfreq" ]; then
+    sendreport=1
+    reporttime=$(date +%s)
+  elif [ "$hostfail" -eq 1 ] && [ "$reporttime_bc" -ge "$reportfreq" ]; then
     report=1
-  fi
-  
-  if [ "$report" -eq 1 ]; then
+    sendreport=1
     reporttime=$(date +%s)
   fi
+
   if [ "$entrytime" -le 0 ]; then
     entrytime=$(date +%s)
   fi
 
-  sed -i "s/^${host} .*$//g" ${tmpfile}
-  sed -i '/^$/d' ${tmpfile}
+  sed -i "^${host} .*$/d" ${tmpfile}
   timenow=$(date +%s)
   echo "${host} CPU=${cpustatus_check} CPUFailTime=${cpufailtime} Mem=${memstatus_check} MemFailTime=${memfailtime} HDD=${hddstatus_check} ${hddstatus_line} HDDFailTime=${hddfailtime} ReportTime=${reporttime} Time=${entrytime}" >>${tmpfile}
 
