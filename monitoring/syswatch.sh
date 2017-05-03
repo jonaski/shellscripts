@@ -29,7 +29,7 @@ log=1
 debug=1
 reportfreq=180
 pingtimeout=2
-connecttimeout=2
+connecttimeout=3
 options="-o ConnectTimeout=${connecttimeout}"
 inettesthosts="8.8.8.8 8.8.4.4"
 emailfrom="nobody"

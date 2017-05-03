@@ -28,7 +28,7 @@ log=1
 debug=1
 inettesthosts="8.8.8.8 8.8.4.4"			# Test all of these, only if 1 fails internet is reported to be down.
 pingtimeout=2
-connecttimeout=2
+connecttimeout=3
 maxfailtime=1
 reportfreq=120
 emailfrom="nobody"
@@ -253,10 +253,30 @@ serviceswatch() {
       continue
     fi
     
-    host=$(echo $l | awk '{ print $1}')
+    uhp=$(echo $l | awk '{ print $1}')
     services=$(echo "$l" | cut -d ' ' -f2-)
+
+    echo $uhp | grep '.:.' >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      userhost=$(echo $uhp | cut -d':' -f1)
+      port=$(echo $uhp | cut -d':' -f2)
+      hostoptions="$options -p $port"
+    else
+      userhost=$uhp
+      port=22
+      hostoptions=$options
+    fi
+
+    echo $userhost | grep '.@.' >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      user=$(echo $userhost | cut -d'@' -f1)
+      host=$(echo $userhost | cut -d'@' -f2)
+    else
+      user=root
+      host=$userhost
+    fi
     
-    status "Host: $host - Services: $services"
+    status "Host: $host User: $user - Port: $port UserHost: $userhost - Services: $services"
     
     status=
     fail=0
@@ -268,7 +288,7 @@ serviceswatch() {
     
     for service in $services
     do
-      ssh $options $host systemctl status $service >/dev/null 2>&1
+      ssh $hostoptions $userhost systemctl status $service >/dev/null 2>&1
       if [ $? -eq 0 ]; then # Service is up
         status="up"
       elif [ $? = 3 ]; then # Service is down
@@ -441,7 +461,7 @@ writefile() {
     entrytime=$(date +%s)
   fi
 
-  sed -i "/^${host} .*$//d" ${tmpfile}
+  sed -i "/^${host} .*$/d" ${tmpfile}
   echo "${host} ${services_status} ${entryfail} ${failtime} ${reporttime} ${entrytime}" >>${tmpfile}
 
   debug "writefile() finished"
