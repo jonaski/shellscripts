@@ -103,8 +103,16 @@ logfile () {
   fi
 
   if [ "$logging" = "1" ] && ! [ "$destdir" = "" ] ; then
-    echo "`date` *** $1" >>"$destdir/$logfile" || exit 1
+    echo "`date` *** $1" >>"$destdir/$logfile" || fail
   fi
+
+}
+
+fail () {
+
+  sleep 90d
+
+  exit 1
 
 }
 
@@ -259,7 +267,7 @@ fi
 
 # Create photo directory
 
-mkdir -p $destdir || exit 1
+mkdir -p $destdir || fail
 
 if [ ! -d "$destdir" ] ; then
   echo "ERROR: \"$destdir\" is not a directory!"
@@ -315,19 +323,19 @@ do
   # Copy image to a temporary location
 
   echo $n "Copying \"$cdir/$imagename\" to tempdir \"$tempdir/$imagename\". $c"
-  cp --preserve=timestamps "$cdir/$imagename" "$tempdir/$imagename" || exit 1
+  cp --preserve=timestamps "$cdir/$imagename" "$tempdir/$imagename" || fail
   echo "Done."
   logfile "Copied \"$cdir/$imagename\" to tempdir \"$tempdir/$imagename\"." 1
 
   # Dermine orientation
 
-  #exif=`exiftool -Orientation -n "$tempdir/$imagename"` || exit 1
+  #exif=`exiftool -Orientation -n "$tempdir/$imagename"` || fail
   #if [ "$exif" = "" ] ; then
   #  logfile "ERROR: Cannot dermine orientation for image: \"$tempdir/$imagename\"." 2
   #  read -e -n 1 -p "" answer
   #  exit 1
   #fi
-  #orientation=`echo $exif | awk '{print $3}'` || exit 1
+  #orientation=`echo $exif | awk '{print $3}'` || fail
   orientation=`identify -format '%[exif:orientation]' "$tempdir/$imagename"`
   if [ "$orientation" = "" ] ; then
     logfile "ERROR: Cannot dermine orientation for image: \"$tempdir/$imagename\"." 2
@@ -382,7 +390,7 @@ do
   fi
   #echo "exif: $exif"
 
-  date=`echo $exif | awk '{print $4}'` || exit 1
+  date=`echo $exif | awk '{print $4}'` || fail
   if [ "$date" = "" ] ; then
     logfile "ERROR: Cannot dermine date for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
@@ -390,20 +398,20 @@ do
   fi
   #echo "Date: $date"
 
-  time=`echo $exif | awk '{print $5}'` || exit 1
+  time=`echo $exif | awk '{print $5}'` || fail
   if [ "$date" = "" ] ; then
     logfile "ERROR: Cannot dermine time for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
 
-  date=`echo $date |  sed 's/://g'` || exit 1
+  date=`echo $date |  sed 's/://g'` || fail
   if [ "$date" = "" ] ; then
     logfile "ERROR: Cannot dermine date for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
-  time=`echo $time |  sed 's/://g'` || exit 1
+  time=`echo $time |  sed 's/://g'` || fail
   if [ "$date" = "" ] ; then
     logfile "ERROR: Cannot dermine date for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
@@ -416,7 +424,7 @@ do
 
   echo $n "Dermining format and geometry for image \"$tempdir/$imagename\". $c"
   
-  identify=`identify $tempdiresc/$imagenameesc` || exit 1
+  identify=`identify $tempdiresc/$imagenameesc` || fail
   #identifyfake=`echo $identify |  sed 's/\//:/g'`
   #cdirfake=`echo $cdir |  sed 's/\//:/g'`
   #identify=`echo $identifyfake | sed "s/${cdirfake}:${imagename} //g"`
@@ -426,13 +434,13 @@ do
     read -e -n 1 -p "" answer
     exit 1
   fi
-  format=`echo $identify | awk '{print $2}'` || exit 1
+  format=`echo $identify | awk '{print $2}'` || fail
   if [ "$format" = "" ] ; then
     logfile "ERROR: Cannot dermine format for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
-  extension=`echo $format | tr 'A-Z' 'a-z'` || exit 1
+  extension=`echo $format | tr 'A-Z' 'a-z'` || fail
   if [ "$extension" = "" ] ; then
     logfile "ERROR: Cannot dermine extension for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
@@ -441,7 +449,7 @@ do
   case "$extension" in
     jpeg ) extension=jpg;;
   esac
-  geometry=`echo $identify | awk '{print $3}'` || exit 1
+  geometry=`echo $identify | awk '{print $3}'` || fail
   if [ "$geometry" = "" ] ; then
     logfile "ERROR: Cannot dermine geometry for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
@@ -450,13 +458,13 @@ do
 
   # Geometry can be 563x144+0+0 or 75x98
   # we need to get rid of the plus (+) and the x characters:
-  width=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $1}'` || exit 1
+  width=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $1}'` || fail
   if [ "$width" = "" ] ; then
     logfile "ERROR: Cannot dermine width for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
-  height=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $2}'` || exit 1
+  height=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $2}'` || fail
   if [ "$height" = "" ] ; then
     logfile "ERROR: Cannot dermine height for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
@@ -476,7 +484,7 @@ do
       skip=1
       break
     fi
-    imagenumber=`echo $count | awk '{printf("%.3d", $1)}'` || exit 1
+    imagenumber=`echo $count | awk '{printf("%.3d", $1)}'` || fail
     if [ "$imagenumber" = "" ] ; then
       logfile "ERROR: Cannot format number for image: \"$tempdir/$imagename\"."; 2
       read -e -n 1 -p "" answer
@@ -551,5 +559,9 @@ done
 if [ "$automounted" = "1" ]; then
   udisksctl unmount -b $device
 fi
+
+echo "Done."
+
+sleep 90d
 
 exit 0

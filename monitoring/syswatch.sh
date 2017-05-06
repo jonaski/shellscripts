@@ -39,9 +39,9 @@ maxcpu=70.00
 maxhdd=90
 maxmem=90
 
-memfailreporttime=0
-cpufailreporttime=5
-hddfailreporttime=0
+memfailreporttime=60
+cpufailreporttime=60
+hddfailreporttime=60
 
 hosts="server1 server2 server3 server4"
 filesystems="/boot / /usr /opt /var /home /usr/local /tmp /srv /share/MD0_DATA /mnt/HDA_ROOT /mnt/ext"

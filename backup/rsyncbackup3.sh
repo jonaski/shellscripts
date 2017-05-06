@@ -50,7 +50,7 @@ backupconfig="/etc/sysconfig/rsyncbackup3"
 #
 
 backuphost="`hostname -s`"							# <--- Hostname of this machine --->
-backuplockfile="$HOME/RSYNCBACKUP-LOCKFILE-$backuphost"				# <--- Lockfile to prevent multiple occurrences of the script running at the same time --->
+backuplockfiledir="$HOME"							# <--- Lockfile to prevent multiple occurrences of the script running at the same time --->
 backuplockfilettl=86400
 backuplogfile="/var/log/rsyncbackup3.log"					# <--- Logfile, this will be the same output as sent in e-mail reports --->
 backuplogdir="/tmp"								# <--- Temp dir where to store rsync output log files --->
@@ -77,7 +77,7 @@ backupsshfsargs=""								# <--- Arguments to sshfs command --->
 backupsshargs=""								# <--- Arguments to ssh command --->
 
 backupidfile=".RSYNCBACKUPID"							# <--- File touched to identify that the directory is a valid archive --->
-backuptsfile="RSYNCBACKUPTS"							# <--- Timestamp file placed in the archive directory to trac which directory was used last time, HIDDEN FILE WONT WORK! --->
+backuptsfile="RSYNCBACKUPTS"							# <--- Timestamp file placed in the archive directory to track which directory was used last time, HIDDEN FILE WONT WORK! --->
 backupid=$(date '+%Y%m%d%H%M%S')
 backupts=$(date '+%Y%m%d%H%M%S')
 
@@ -87,10 +87,13 @@ backupemailfailure="root"							# <--- Where to send backup report, set to "0" f
 
 backupmntdir="$HOME/tmp-mnt-$RANDOM"						# <--- Where to mount --->
 
-backupgziplog=1
+backupgziplog=1									# <--- Compress logfile --->
+
+backupwaitforhost=120								# <--- How long time in seconds to wait for a host to come online before giving up - This require hosts to respond to PING! Set it to 0 to skip checking if host is up. --->
 
 # One or more sources that you want to backup.
 # Syntax are, Local: /home or SSH(SFTP): host:/home
+# Files/directories specified with '-' in front will be exceptions.
 
 backupsources="\
 server:		/etc,/var,/srv,/home,/usr/local,/tmp
@@ -398,16 +401,24 @@ backup_init() {
   echo "$log" >>$backuplogfile || { backup_failure_report_all; exit_failure; }
 
   # Check if script is already running
-  
-  if [ -f "$backuplockfile" ]; then
-    error "Script is already running. If this is incorrect, remove: $backuplockfile."
-    backup_failure_report_all
-    exit_failure
-  fi
+
+  backuplockfile="${backuplockfiledir}/RSYNCBACKUP-LOCKFILE-$(which $0 | $SED 's/\//-/g' | $SED 's/ /-/g' | $SED 's/\./-/g').lock"
+  backuplockfile=$(echo $backuplockfile | $SED 's/--/-/g')
+
   which lockfile >/dev/null 2>&1
   if [ $? -eq 0 ] ; then
-    lockfile -r 0 -l $backuplockfilettl $backuplockfile || { backup_failure_report_all; exit_failure; }
+    lockfile -r 0 -l $backuplockfilettl $backuplockfile
+    if ! [ $? -eq 0 ] ; then
+      error "Script is already running. If this is incorrect, remove: $backuplockfile."
+      backup_failure_report_all
+      exit_failure
+    fi
   else
+    if [ -f "$backuplockfile" ]; then
+      error "Script is already running. If this is incorrect, remove: $backuplockfile."
+      backup_failure_report_all
+      exit_failure
+    fi
     $TOUCH $backuplockfile || { backup_failure_report_all; exit_failure; }
   fi
   lockfile=1
@@ -581,7 +592,7 @@ backup_loadconf() {
   for i in \
   "backupconfig" \
   "backuphost" \
-  "backuplockfile" \
+  "backuplockfiledir" \
   "backuplockfilettl" \
   "backuplogfile" \
   "backupdate" \
@@ -600,7 +611,8 @@ backup_loadconf() {
   "backuparchivedir" \
   "backupmntdir" \
   "backuplogdir" \
-  "backupgziplog"
+  "backupgziplog" \
+  "backupwaitforhost"
   do
     if [ "${!i}" = "" ]; then
       error "Missing configuration variable \"$i\" in $backupconfig!"
@@ -652,6 +664,7 @@ backup_source_loop() {
     sourcefiles=
     sourcemountpoint=
     log=
+    sourceexcludes=
 
     ret=
     echo $backupsource | $GREP '^\/' >/dev/null 2>&1
@@ -731,6 +744,32 @@ backup_source_ssh() {
   
   status "Doing backup of remote source \"$sourcehost\"."
 
+  # Check if host is up
+
+  if [ "$backupwaitforhost" -gt 0 ]; then
+    pingstarttime=`date +%s`
+    waitprint=0
+    while :
+    do
+      ping -c 1 $sourcehost >/dev/null 2>&1
+      if [ $? -eq 0 ]; then
+        status "Backup source \"$sourcehost\" is up."
+        break
+      fi
+      if [ "$waitprint" -eq 0 ]; then
+        waitprint=1
+        status "Backup source \"$sourcehost\" is down - Waiting for host to respond."
+      fi
+      sleep 5
+      timenow=`date +%s`
+      time=$(echo $timenow - $pingstarttime | bc)
+      if [ "$time" -ge "$backupwaitforhost" ]; then
+        status "Backup source \"$sourcehost\" is down - Giving up."
+        break
+      fi
+    done
+  fi
+
   sourcemountpoint="$backupmntdir/ssh-`hostname -s`-$sourcehost-$backupdate-$RANDOM"
   mkdir -p $sourcemountpoint || return 1
   statusnn "Connecting SSH source \"$sourcehost\" on \"$sourcemountpoint\"."
@@ -754,6 +793,7 @@ backup_source_checkdirs() {
   sourcefilesX=$(echo "$sourcefiles" | tr '\n' ' ' | $SED -e 's/^ //g' | $SED -e 's/  / /g')
   sourcefiles=
   sourcefilesmissing=0
+  sourceexcludes=
 
   for ((i=1; ; i++))
   do
@@ -761,6 +801,20 @@ backup_source_checkdirs() {
     if [ "$s" = "" ]; then
       break
     fi
+
+    echo "$s" | $GREP -i '^-.*$' >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      s=$(echo $s | $SED -e 's/^-//g')
+      debug "Excluding file \"$s\" for \"$sourcehost\"."
+      if [ "$sourceexcludes" = "" ]; then
+        sourceexcludes="$s"
+      else
+        sourceexcludes="$sourceexcludes
+        $s"
+      fi
+      continue
+    fi
+
     if [ "$sourcemountpoint" = "" ]; then
       lsfile=$s
     else
@@ -768,6 +822,7 @@ backup_source_checkdirs() {
     fi
     $LS $lsfile >/dev/null 2>&1
     if [ $? -eq 0 ] ; then
+      debug "Including file \"$s\" for \"$sourcehost\"."
       if [ "$sourcehost" = "`hostname -s`" ]; then
         sourcefiles="$sourcefiles $s"
       else
@@ -779,7 +834,7 @@ backup_source_checkdirs() {
       sourcefilesmissing=$(echo $sourcefilesmissing + 1 | bc)
     fi
   done
-  
+
   sourcefiles=$(echo "$sourcefiles" | $SED -e 's/^ //g')
   sourcefilesX=
 
@@ -798,7 +853,7 @@ backup_source_checkdirs() {
     error "One or more source files missing for \"$sourcehost\", aborting backup!"
     return 1
   fi
-  
+
   if [ "$sourcehost" = "`hostname -s`" ]; then
     sourcefiles="$sourcefiles /dev/null"
   else
@@ -826,7 +881,7 @@ backup_dest_loop() {
     destmountpoint=
     destmountdir=
     destmounted=0
-    
+
     rsyncstart=
     rsyncfinish=
 
@@ -1252,13 +1307,17 @@ backup_rsync() {
   
   # Create exclude file
 
-  backupexcludestmpfile="/tmp/rsyncbackup-excludes-$backupdate-$RANDOM.txt"
+  backupexcludestmpfile="/tmp/rsyncbackup-excludes-$sourcehost-$backupdate-$RANDOM.txt"
   echo "$backupexclude" >$backupexcludestmpfile || { backup_failure_report_all; exit_failure; }
-  echo "$backupmntdir" >>$backupexcludestmpfile || { backup_failure_report_all; exit_failure; }
+  if ! [ "$sourceexcludes" = "" ]; then
+    echo "$sourceexcludes" >>$backupexcludestmpfile || { backup_failure_report_all; exit_failure; }
+  fi
   if [ "$sourcehost" = "$desthost" ]; then
     echo "$destdir" >>$backupexcludestmpfile || return 1
   fi
-  
+  echo "$backupmntdir" >>$backupexcludestmpfile || { backup_failure_report_all; exit_failure; }
+  $SED -i '/^$/d' $backupexcludestmpfile || { backup_failure_report_all; exit_failure; }
+
   if [ "$backuprun" = "1" ]; then
     echo "Command: rsync $backuprsyncargs --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile
     echo "Command: rsync $backuprsyncargs --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile_stdout

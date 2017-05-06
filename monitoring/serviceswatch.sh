@@ -29,7 +29,7 @@ debug=1
 inettesthosts="8.8.8.8 8.8.4.4"			# Test all of these, only if 1 fails internet is reported to be down.
 pingtimeout=2
 connecttimeout=3
-maxfailtime=1
+maxfailtime=120
 reportfreq=120
 emailfrom="nobody"
 emailto="root"
@@ -252,7 +252,7 @@ serviceswatch() {
     if [ "$l" = "" ]; then
       continue
     fi
-    
+
     uhp=$(echo $l | awk '{ print $1}')
     services=$(echo "$l" | cut -d ' ' -f2-)
 
