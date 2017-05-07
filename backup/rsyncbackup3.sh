@@ -67,13 +67,13 @@ backuparchivedir="`date '+%Y%m%d'`"                                             
 # Arguments to rsync command
 
 # Dry run
-backuprsyncargs="-vaRn --itemize-changes --delete --delete-excluded -e 'ssh -o BatchMode=yes'"
+backuprsyncargs="-vaRn --itemize-changes --delete --delete-excluded"
 
 # Archive
-#backuprsyncargs="-vaR --itemize-changes --delete --delete-excluded -e 'ssh -o BatchMode=yes'"
+#backuprsyncargs="-vaR --itemize-changes --delete --delete-excluded"
 
 # Checksum
-#backuprsyncargs="-vacR --itemize-changes --delete --delete-excluded -e 'ssh -o BatchMode=yes'"
+#backuprsyncargs="-vacR --itemize-changes --delete --delete-excluded"
 
 backupsshfsargs=""								# <--- Arguments to sshfs command --->
 backupsshargs=""								# <--- Arguments to ssh command --->
