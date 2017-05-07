@@ -33,7 +33,7 @@ maxfailtime=120
 reportfreq=120
 emailfrom="nobody"
 emailto="root"
-options="-o ConnectTimeout=${connecttimeout}"
+options="-o ConnectTimeout=${connecttimeout} -oBatchMode=yes"
 
 hosts="
 server1 rsyslog sshd named sendmail saslauthd spfmilter opendkim opendmarc milter-regex spamd dovecot apache

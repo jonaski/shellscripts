@@ -41,7 +41,7 @@
 # Relative path names: -R
 #
 
-backupversion="3.1.5"
+backupversion="3.2.1"
 backupconfig="/etc/sysconfig/rsyncbackup3"
 
 #
@@ -51,9 +51,9 @@ backupconfig="/etc/sysconfig/rsyncbackup3"
 
 backuphost="`hostname -s`"							# <--- Hostname of this machine --->
 backuplockfiledir="$HOME"							# <--- Lockfile to prevent multiple occurrences of the script running at the same time --->
-backuplockfilettl=86400
+backuplockfilettl=172800
 backuplogfile="/var/log/rsyncbackup3.log"					# <--- Logfile, this will be the same output as sent in e-mail reports --->
-backuplogdir="/tmp"								# <--- Temp dir where to store rsync output log files --->
+backuplogdir="/tmp"								# <--- Directory to temporary store rsync log files --->
 backupdate="`date '+%Y%m%d-%H%M%S'`"						# <--- Datestamp --->
 backupdebug=0									# <--- Debug output, starting script with -d will set this to 1 --->
 
@@ -64,14 +64,16 @@ backuparchivedir="`date '+%Y%m%d'`"                                             
 # If backuparchivedirs is set, it will use only these directories instead of renamed directories
 #backuparchivedirs="backup1 backup2 backup3"					# <--- Subdirs of backupdir, the script will loop through these and update the oldest archive --->
 
+# Arguments to rsync command
+
 # Dry run
-backuprsyncargs="-vaRn --itemize-changes --delete --delete-excluded"		# <--- Arguments to rsync command --->
+backuprsyncargs="-vaRn --itemize-changes --delete --delete-excluded -e 'ssh -o BatchMode=yes'"
 
 # Archive
-#backuprsyncargs="-vaR --itemize-changes --delete --delete-excluded"		# <--- Arguments to rsync command --->
+#backuprsyncargs="-vaR --itemize-changes --delete --delete-excluded -e 'ssh -o BatchMode=yes'"
 
 # Checksum
-#backuprsyncargs="-vacR --itemize-changes --delete --delete-excluded"		# <--- Arguments to rsync command --->
+#backuprsyncargs="-vacR --itemize-changes --delete --delete-excluded -e 'ssh -o BatchMode=yes'"
 
 backupsshfsargs=""								# <--- Arguments to sshfs command --->
 backupsshargs=""								# <--- Arguments to ssh command --->
@@ -89,15 +91,20 @@ backupmntdir="$HOME/tmp-mnt-$RANDOM"						# <--- Where to mount --->
 
 backupgziplog=1									# <--- Compress logfile --->
 
-backupwaitforhost=120								# <--- How long time in seconds to wait for a host to come online before giving up - This require hosts to respond to PING! Set it to 0 to skip checking if host is up. --->
+backupsourceretries=3								# <--- Times to retry if there is an error --->
+backupsourceretrydelay=3							# <--- Time to sleep between each retry attempt if there is an error --->
+backupsourceretryttl=60								# <--- Maximum time to attempt backup source before giving up --->
+backupsourceconnectdelay=10							# <--- Time to sleep between each connect attempt if there is an error --->
+backupsourceconnectttl=172800							# <--- How long time in seconds to wait for a host to come online before giving up --->
 
 # One or more sources that you want to backup.
 # Syntax are, Local: /home or SSH(SFTP): host:/home
+# Use comma to seperate each file/directory to backup.
 # Files/directories specified with '-' in front will be exceptions.
 
 backupsources="\
-server:		/etc,/var,/srv,/home,/usr/local,/tmp
-pc:		/etc,/var,/srv,/home,/usr/local,/mnt/datadisk,/tmp
+server:		/etc,/var,/srv,/home,/usr/local,/tmp,-/mnt/backup
+pc:		/etc,/var,/srv,/home,/usr/local,/mnt/datadisk,/tmp,-/mnt/backup
 "
 
 # One or more destinations where you want to backup files to.
@@ -143,25 +150,15 @@ backupexclude="\
 /home/*/backup
 /home/*/Backup
 /home/*/build
-/home/*/.xsession-errors
+/home/*/.xsession-errors*
 /home/*/.local/share/Trash
 /home/*/.local/share/akonadi
-/home/*/.config/google-chrome/Default/Local Storage/*
-/home/*/.config/google-chrome/Cookies*
-/home/*/.config/google-chrome/History*
-/home/*/.config/google-chrome/Default/Application Cache
 /home/*/.cache
 /home/*/.thumbnails
 /home/*/.qt
 /home/*/.gvfs
 /home/*/.dbus
 /home/*/.netx
-/home/*/.kde/cache-*
-/home/*/.kde/tmp-*
-/home/*/.kde/socket-*
-/home/*/.kde4/cache-*
-/home/*/.kde4/tmp-*
-/home/*/.kde4/socket-*
 /home/*/.beagle
 /home/*/.pulse-cookie
 /home/*/.pulse
@@ -170,6 +167,10 @@ backupexclude="\
 /home/*/.java
 /home/*/.adobe
 /home/*/.macromedia
+/home/*/.config/google-chrome/Default/Local Storage/*
+/home/*/.config/google-chrome/Cookies*
+/home/*/.config/google-chrome/History*
+/home/*/.config/google-chrome/Default/Application Cache
 /home/*/.mozilla/firefox/*/Cache*
 /home/*/.opera/cache
 /home/*/.mythtv/*cache
@@ -177,13 +178,19 @@ backupexclude="\
 /home/*/.googleearth
 /home/*/.wine
 /home/*/.wine_*
+/home/*/.kde/cache-*
+/home/*/.kde/tmp-*
+/home/*/.kde/socket-*
+/home/*/.kde4/cache-*
+/home/*/.kde4/tmp-*
+/home/*/.kde4/socket-*
 /home/*/.kde4/share/apps/nepomuk
 /home/*/.kde/share/apps/amarok/albumcovers/cache
 "
 
 # Variables - Don't change this.
 
-cmds_required="which tput cat cut tr sed grep bc cp mv rm mkdir rmdir touch md5sum date hostname mutt mount umount mountpoint fusermount ssh sshfs rsync"
+cmds_required="which tput cat cut tr sed grep wc bc cp mv rm mkdir rmdir touch md5sum date hostname mutt mount umount mountpoint fusermount ssh sshfs rsync"
 cmds_prefergnu="ls cat cut grep sed tr touch"
 cmds_requiregnu="ls"
 
@@ -200,12 +207,7 @@ TOUCH="touch"
 
 # Functions below here
 
-dummy() {
-
-  echo "">/dev/null
-
-}
-
+dummy() { echo "">/dev/null; }
 timestamp() { TS=$(date '+%d/%m-%Y %H:%M:%S'); }
 
 print() {
@@ -394,7 +396,7 @@ backup_init() {
   # Load configuration
 
   backup_loadconf
-  
+
   # Initialize logfile
 
   $TOUCH $backuplogfile || { backup_failure_report_all; exit_failure; }
@@ -402,7 +404,7 @@ backup_init() {
 
   # Check if script is already running
 
-  backuplockfile="${backuplockfiledir}/RSYNCBACKUP-LOCKFILE-$(which $0 | $SED 's/\//-/g' | $SED 's/ /-/g' | $SED 's/\./-/g').lock"
+  backuplockfile="${backuplockfiledir}/RSYNCBACKUP-LOCKFILE-$(echo $backupconfig | $SED 's/\//-/g' | $SED 's/ /-/g' | $SED 's/\./-/g').lock"
   backuplockfile=$(echo $backuplockfile | $SED 's/--/-/g')
 
   which lockfile >/dev/null 2>&1
@@ -429,7 +431,7 @@ backup_init() {
   # Loop sources
   backup_source_loop
 
-  if [ "$sourcesfailure" -gt "0" ] || [ "$destinationsfailure" -gt "0" ] ; then
+  if [ "$sources_failure" -gt "0" ] || [ "$destinationsfailure" -gt "0" ] ; then
     exit_failure
   else
     exit_success
@@ -612,7 +614,12 @@ backup_loadconf() {
   "backupmntdir" \
   "backuplogdir" \
   "backupgziplog" \
-  "backupwaitforhost"
+  "backupsourceretries" \
+  "backupsourceretrydelay" \
+  "backupsourceretryttl" \
+  "backupsourceconnectdelay" \
+  "backupsourceconnectttl"
+  
   do
     if [ "${!i}" = "" ]; then
       error "Missing configuration variable \"$i\" in $backupconfig!"
@@ -640,8 +647,8 @@ backup_loadconf() {
   backupdestinations=$(echo "$backupdestinations" | tr -d ' ' | tr -d '\t')
   backupdestinations=$(echo "$backupdestinations" | tr '\n' ' ')
   
-  sourcessuccess=0
-  sourcesfailure=0
+  sources_success=0
+  sources_failure=0
   
   destinationssuccess=0
   destinationsfailure=0
@@ -654,52 +661,84 @@ backup_loadconf() {
 
 backup_source_loop() {
 
-  count_src=0
-  for backupsource in $backupsources
+  sources_total=$(echo $backupsources | wc -w)
+  sources_finished=0
+
+  while [ "$sources_finished" -lt "$sources_total" ]
   do
+    source_index=0
+    for backupsource in $backupsources
+    do
 
-    count_src=$(echo $count_src + 1 | bc)
+      source_index=$(echo $source_index + 1 | bc)
+      
+      sourcehost=
+      sourceuser=
+      sourcefiles=
+      sourcemountpoint=
+      sourceexcludes=
+      log=${source_log[$source_index]}
 
-    sourcehost=
-    sourcefiles=
-    sourcemountpoint=
-    log=
-    sourceexcludes=
-
-    ret=
-    echo $backupsource | $GREP '^\/' >/dev/null 2>&1
-    if [ $? -eq 0 ]; then # Local
-      backup_source_local
-      ret=$?
-    fi
-    echo $backupsource | $GREP '.*:\/' >/dev/null 2>&1
-    if [ $? -eq 0 ]; then # SSH
-      backup_source_ssh
-      ret=$?
-    fi
-    
-    if [ "$ret" = "" ]; then
-      sourcesfailure=$(echo $sourcesfailure + 1 | bc)
-      error "Unknown backup source: \"$backupsource\""
-      if ! [ "$backupemailfailure" = "0" ]; then
-        backup_source_failure_report
+      if ! [ "${source_finished[$source_index]}" = "" ] && [ "${source_finished[$source_index]}" -eq 1 ]; then
+        continue
       fi
-      continue
-    fi
-
-    if [ "$ret" -eq "0" ]; then
-      sourcessuccess=$(echo $sourcessuccess + 1 | bc)
-      backup_dest_loop
-    else
-      sourcesfailure=$(echo $sourcesfailure + 1 | bc)
-      if ! [ "$backupemailfailure" = "0" ]; then
-        backup_source_failure_report
+      if [ "${source_count[$source_index]}" = "" ]; then
+        source_count[$source_index]=1
+        sourcecount=${source_count[$source_index]}
+        source_timestart[$source_index]=`date +%s`
+      else
+        source_count[$source_index]=$(echo ${source_count[$source_index]} + 1 | bc)
+        sourcecount=${source_count[$source_index]}
       fi
-    fi
-    
+
+      ret=
+      echo $backupsource | $GREP '^\/' >/dev/null 2>&1
+      if [ $? -eq 0 ]; then # Local
+        backup_source_local
+        ret=$?
+      fi
+      echo $backupsource | $GREP '.*:\/' >/dev/null 2>&1
+      if [ $? -eq 0 ]; then # SSH
+        backup_source_ssh
+        ret=$?
+      fi
+
+      if [ "$ret" = "" ]; then
+        source_finished[$source_index]=1
+        sources_finished=$(echo $sources_finished + 1 | bc)
+        sources_failure=$(echo $sources_failure + 1 | bc)
+        error "Unknown backup source: \"$backupsource\""
+        sourcehost=$backupsource
+        if ! [ "$backupemailfailure" = "0" ]; then
+          backup_source_failure_report
+        fi
+        continue
+      elif [ "$ret" -eq 0 ]; then
+        source_finished[$source_index]=1
+        sources_finished=$(echo $sources_finished + 1 | bc)
+        sources_success=$(echo $sources_success + 1 | bc)
+        backup_dest_loop
+        continue
+      else
+        timenow=`date +%s`
+        time=$(echo $timenow - ${source_timestart[$source_index]} | bc)
+        if [ "${source_count[$source_index]}" -ge "$backupsourceretries" ] || [ "$time" -ge "$backupsourceretryttl" ]; then
+          source_finished[$source_index]=1
+          sources_finished=$(echo $sources_finished + 1 | bc)
+          sources_failure=$(echo $sources_failure + 1 | bc)
+          if ! [ "$backupemailfailure" = "0" ]; then
+            backup_source_failure_report
+          fi
+          continue
+        fi
+        source_log[$source_index]=$log
+        continue
+      fi
+
+    done
   done
-  
-  if [ $sourcesfailure -eq 0 ] ; then
+
+  if [ "$sources_failure" -eq 0 ] ; then
     return 0
   else
     return 1
@@ -716,8 +755,13 @@ backup_source_local() {
     sourcefiles=$backupsource
   fi
   sourcemountpoint=
+  
+  if [ "$sourcecount" -gt 1 ]; then
+    status "Waiting $backupsourceretrydelay seconds to retry local source \"$sourcehost\"."
+    sleep $backupsourceretrydelay
+  fi
 
-  status "Doing backup of local source \"$sourcehost\"."
+  status "Doing backup of local source \"$sourcehost\" [$sourcecount]."
   
   backup_source_checkdirs
   
@@ -730,7 +774,7 @@ backup_source_ssh() {
   sourcehost=$(echo $backupsource | cut -d':' -f1)
   sourceuh=$sourcehost
   sourcefiles=$(echo $backupsource | cut -d':' -f2-)
-  
+
   echo $sourcehost | $GREP '.@.' >/dev/null 2>&1
   if [ $? -eq 0 ]; then
     sourceuser=$(echo $sourcehost | cut -d'@' -f1)
@@ -742,33 +786,36 @@ backup_source_ssh() {
     return $?
   fi
   
-  status "Doing backup of remote source \"$sourcehost\"."
+  if [ "$sourcecount" -gt 1 ]; then
+    status "Waiting $backupsourceretrydelay seconds to retry remote source \"$sourcehost\"."
+    sleep $backupsourceretrydelay
+  fi
+
+  status "Doing backup of remote source \"$sourcehost\" [$sourcecount]."
 
   # Check if host is up
 
-  if [ "$backupwaitforhost" -gt 0 ]; then
-    pingstarttime=`date +%s`
-    waitprint=0
-    while :
-    do
-      ping -c 1 $sourcehost >/dev/null 2>&1
-      if [ $? -eq 0 ]; then
-        status "Backup source \"$sourcehost\" is up."
-        break
-      fi
-      if [ "$waitprint" -eq 0 ]; then
-        waitprint=1
-        status "Backup source \"$sourcehost\" is down - Waiting for host to respond."
-      fi
-      sleep 5
-      timenow=`date +%s`
-      time=$(echo $timenow - $pingstarttime | bc)
-      if [ "$time" -ge "$backupwaitforhost" ]; then
-        status "Backup source \"$sourcehost\" is down - Giving up."
-        break
-      fi
-    done
-  fi
+  checkstarttime=`date +%s`
+  waitprint=0
+  while :
+  do
+    ssh -o ConnectTimeout=3 -o BatchMode=yes $sourceuh echo "" >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      status "Backup source \"$sourcehost\" is up."
+      break
+    fi
+    if [ "$waitprint" -eq 0 ]; then
+      waitprint=1
+      error "Backup source \"$sourcehost\" is down - Waiting for host to respond."
+    fi
+    sleep $backupsourceconnectdelay
+    timenow=`date +%s`
+    time=$(echo $timenow - $checkstarttime | bc)
+    if [ "$time" -ge "$backupsourceconnectttl" ]; then
+      error "Backup source \"$sourcehost\" is down - Giving up."
+      return 1
+    fi
+  done
 
   sourcemountpoint="$backupmntdir/ssh-`hostname -s`-$sourcehost-$backupdate-$RANDOM"
   mkdir -p $sourcemountpoint || return 1
@@ -849,7 +896,7 @@ backup_source_checkdirs() {
     return 1
   fi
 
-  if ! [ "$sourcefilesmissing" = "0" ]; then
+  if ! [ "$sourcefilesmissing" -eq 0 ]; then
     error "One or more source files missing for \"$sourcehost\", aborting backup!"
     return 1
   fi
@@ -877,6 +924,8 @@ backup_dest_loop() {
     desttype=
     desttarget=
     desthost=
+    destuser=
+    destuh=
     destdir=
     destmountpoint=
     destmountdir=
@@ -915,12 +964,12 @@ backup_dest_loop() {
       continue
     fi
     
-    if [ "$ret" -eq "0" ] ; then
+    if [ "$ret" -eq 0 ] ; then
       backup_rsync
       ret=$?
     fi
 
-    if [ "$ret" -eq "0" ] ; then
+    if [ "$ret" -eq 0 ] ; then
       destinationssuccess=$(echo $destinationssuccess + 1 | bc)
       if ! [ "$backupemailsuccess" = "0" ]; then
         backup_success_report
@@ -1017,7 +1066,7 @@ backup_dest_ssh() {
   desthost=$(echo $backupdest | cut -d':' -f1)
   destuh=$desthost
   destdir=$(echo $backupdest | cut -d':' -f2-)
-  
+
   echo $desthost | $GREP '.@.' >/dev/null 2>&1
   if [ $? -eq 0 ]; then
     destuser=$(echo $desthost | cut -d'@' -f1)
@@ -1075,7 +1124,7 @@ backup_dest_smb() {
   desttarget=$destmountdir
 
   debug "Backup to smb destination \"$backupdest\"."
-  
+
   mkdir -p $destmountpoint || return 1
 
   if ! [ "$destuser" = "" ] && ! [ "$destpass"  = "" ] ; then
@@ -1319,11 +1368,11 @@ backup_rsync() {
   $SED -i '/^$/d' $backupexcludestmpfile || { backup_failure_report_all; exit_failure; }
 
   if [ "$backuprun" = "1" ]; then
-    echo "Command: rsync $backuprsyncargs --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile
-    echo "Command: rsync $backuprsyncargs --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile_stdout
-    status "Running rsync $backuprsyncargs --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles ${desttargetfull}"
+    echo "Command: rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile
+    echo "Command: rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile_stdout
+    status "Running rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles ${desttargetfull}"
     starttime=`date +%s`
-    rsync $backuprsyncargs --exclude-from="$backupexcludestmpfile" --log-file="$backuplogtmpfile" $sourcefiles $desttargetfull >$backuplogtmpfile_stdout || {
+    rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from="$backupexcludestmpfile" --log-file="$backuplogtmpfile" $sourcefiles $desttargetfull >$backuplogtmpfile_stdout || {
       error "Rsync command failed for backup source \"$sourcehost\" destination \"$desthost\"."
       return 1
     }
@@ -1335,13 +1384,13 @@ backup_rsync() {
     result "Rsync finished for \"$sourcehost\" to \"$desthost\" in $rsyncts. See \"$backuplogtmpfile\" for results."
   else
     error "Skipping rsync command on \"$sourcehost\" to \"$backupdest\" --- To actually perform rsync run script again with $0 -R"
-    error "Command is: rsync $backuprsyncargs --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull"
+    error "Command is: rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull"
     return 1
   fi
 
   # Update the timestamp file into the archive directories
   # This is how the script tracks which directory to use next time
-  
+
   # Mount backup destination again to update TS
   if [ "$desttype" -eq "1" ] ; then
     backup_dest_local_mount || return 1
