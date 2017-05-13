@@ -1431,6 +1431,7 @@ Rsync backup script on `hostname` on `date` FAILED
 Sources: $backupsources
 Destinations: $backupdestinations
 Configuration file: $backupconfig
+Rsync arguments: $backuprsyncargs
 Files excluded: $backupexcludeoneline
 
 $logall
@@ -1452,6 +1453,7 @@ Rsync backup for $sourcehost on `date` FAILED
 Source: $backupsource
 Destinations: $backupdestinations
 Configuration file: $backupconfig
+Rsync arguments: $backuprsyncargs
 Files excluded: $backupexcludeoneline
 
 $log
@@ -1484,6 +1486,7 @@ Destination: $backupdest
 Time: $rsyncts
 Archive directory: $destarchivedir
 Configuration file: $backupconfig
+Rsync arguments: $backuprsyncargs
 Files excluded: $backupexcludeoneline
 
 $log
@@ -1515,6 +1518,7 @@ Source: $backupsource
 Destination: $backupdest
 Archive directory: $destarchivedir
 Configuration file: $backupconfig
+Rsync arguments: $backuprsyncargs
 Files excluded: $backupexcludeoneline
 
 $log
