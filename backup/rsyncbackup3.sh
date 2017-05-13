@@ -686,6 +686,7 @@ backup_source_loop() {
         source_count[$source_index]=1
         sourcecount=${source_count[$source_index]}
         source_timestart[$source_index]=`date +%s`
+        source_destloop[$source_index]=0
       else
         source_count[$source_index]=$(echo ${source_count[$source_index]} + 1 | bc)
         sourcecount=${source_count[$source_index]}
@@ -696,11 +697,12 @@ backup_source_loop() {
       if [ $? -eq 0 ]; then # Local
         backup_source_local
         ret=$?
-      fi
-      echo $backupsource | $GREP '.*:\/' >/dev/null 2>&1
-      if [ $? -eq 0 ]; then # SSH
-        backup_source_ssh
-        ret=$?
+      else
+        echo $backupsource | $GREP '.*:\/' >/dev/null 2>&1
+        if [ $? -eq 0 ]; then # SSH
+          backup_source_ssh
+          ret=$?
+        fi
       fi
 
       if [ "$ret" = "" ]; then
@@ -712,13 +714,16 @@ backup_source_loop() {
         if ! [ "$backupemailfailure" = "0" ]; then
           backup_source_failure_report
         fi
+        source_log[$source_index]=
         continue
       elif [ "$ret" -eq 0 ]; then
         backup_dest_loop
+        source_destloop[$source_index]=1
         if [ "$destinations_success" -gt 0 ]; then
           source_finished[$source_index]=1
           sources_finished=$(echo $sources_finished + 1 | bc)
           sources_success=$(echo $sources_success + 1 | bc)
+          source_log[$source_index]=
           continue
         fi
       fi
@@ -728,12 +733,15 @@ backup_source_loop() {
         source_finished[$source_index]=1
         sources_finished=$(echo $sources_finished + 1 | bc)
         sources_failure=$(echo $sources_failure + 1 | bc)
-        if ! [ "$backupemailfailure" = "0" ]; then
-          backup_source_failure_report
+        if ! [ "$backupemailfailure" = "0" ] && [ "$source_destloop[$source_index]" -eq 0 ]; then
+	  backup_source_failure_report
         fi
-        continue
       fi
-      source_log[$source_index]=$log
+      if [ "$source_destloop[$source_index]" -eq 0 ]; then
+        source_log[$source_index]=$log
+      else
+        source_log[$source_index]=
+      fi
       continue
 
     done
