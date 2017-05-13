@@ -431,7 +431,7 @@ backup_init() {
   # Loop sources
   backup_source_loop
 
-  if [ "$sources_failure" -gt "0" ] || [ "$destinationsfailure" -gt "0" ] ; then
+  if [ "$sources_failure" -gt 0 ] ; then
     exit_failure
   else
     exit_success
@@ -650,8 +650,8 @@ backup_loadconf() {
   sources_success=0
   sources_failure=0
   
-  destinationssuccess=0
-  destinationsfailure=0
+  destinations_success=0
+  destinations_failure=0
 
   debug "backupsources: $backupsources"
   debug "backupdestinations: $backupdestinations"
@@ -714,26 +714,27 @@ backup_source_loop() {
         fi
         continue
       elif [ "$ret" -eq 0 ]; then
-        source_finished[$source_index]=1
-        sources_finished=$(echo $sources_finished + 1 | bc)
-        sources_success=$(echo $sources_success + 1 | bc)
         backup_dest_loop
-        continue
-      else
-        timenow=`date +%s`
-        time=$(echo $timenow - ${source_timestart[$source_index]} | bc)
-        if [ "${source_count[$source_index]}" -ge "$backupsourceretries" ] || [ "$time" -ge "$backupsourceretryttl" ]; then
+        if [ "$destinations_success" -gt 0 ]; then
           source_finished[$source_index]=1
           sources_finished=$(echo $sources_finished + 1 | bc)
-          sources_failure=$(echo $sources_failure + 1 | bc)
-          if ! [ "$backupemailfailure" = "0" ]; then
-            backup_source_failure_report
-          fi
+          sources_success=$(echo $sources_success + 1 | bc)
           continue
         fi
-        source_log[$source_index]=$log
+      fi
+      timenow=`date +%s`
+      time=$(echo $timenow - ${source_timestart[$source_index]} | bc)
+      if [ "${source_count[$source_index]}" -ge "$backupsourceretries" ] || [ "$time" -ge "$backupsourceretryttl" ]; then
+        source_finished[$source_index]=1
+        sources_finished=$(echo $sources_finished + 1 | bc)
+        sources_failure=$(echo $sources_failure + 1 | bc)
+        if ! [ "$backupemailfailure" = "0" ]; then
+          backup_source_failure_report
+        fi
         continue
       fi
+      source_log[$source_index]=$log
+      continue
 
     done
   done
@@ -913,13 +914,13 @@ backup_source_checkdirs() {
 
 backup_dest_loop() {
 
-  count_dst=0
+  destinations_failure=0
+  destinations_success=0
+
   for backupdest in $backupdestinations
   do
   
     status "Doing backup from source \"$sourcehost\" to destination \"$backupdest\"."
-
-    count_dst=$(echo $count_dst + 1 | bc)
 
     desttype=
     desttarget=
@@ -956,26 +957,26 @@ backup_dest_loop() {
     fi
 
     if [ "$ret" = "" ] ; then
-      destinationsfailure=$(echo $destinationsfailure + 1 | bc)
+      destinations_failure=$(echo $destinations_failure + 1 | bc)
       error "Unknown backup destination: \"$backupdest\""
       if ! [ "$backupemailfailure" = "0" ]; then
         backup_failure_report
       fi
       continue
     fi
-    
+
     if [ "$ret" -eq 0 ] ; then
       backup_rsync
       ret=$?
     fi
 
     if [ "$ret" -eq 0 ] ; then
-      destinationssuccess=$(echo $destinationssuccess + 1 | bc)
+      destinations_success=$(echo $destinations_success + 1 | bc)
       if ! [ "$backupemailsuccess" = "0" ]; then
         backup_success_report
       fi
     else
-      destinationsfailure=$(echo $destinationsfailure + 1 | bc)
+      destinations_failure=$(echo $destinations_failure + 1 | bc)
       if ! [ "$backupemailfailure" = "0" ]; then
         backup_failure_report
       fi
@@ -995,8 +996,8 @@ backup_dest_loop() {
     fi
 
   done
-  
-  if [ $destinationsfailure -eq 0 ] ; then
+
+  if [ $destinations_failure -eq 0 ] ; then
     return 0
   else
     return 1
@@ -1367,7 +1368,7 @@ backup_rsync() {
   echo "$backupmntdir" >>$backupexcludestmpfile || { backup_failure_report_all; exit_failure; }
   $SED -i '/^$/d' $backupexcludestmpfile || { backup_failure_report_all; exit_failure; }
 
-  if [ "$backuprun" = "1" ]; then
+  if [ "$backuprun" -eq 1 ]; then
     echo "Command: rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile
     echo "Command: rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile_stdout
     status "Running rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles ${desttargetfull}"
