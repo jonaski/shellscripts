@@ -661,6 +661,9 @@ backup_loadconf() {
 
 backup_source_loop() {
 
+  sources_success=0
+  sources_failure=0
+
   sources_total=$(echo $backupsources | wc -w)
   sources_finished=0
 
