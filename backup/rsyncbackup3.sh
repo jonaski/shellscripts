@@ -736,11 +736,11 @@ backup_source_loop() {
         source_finished[$source_index]=1
         sources_finished=$(echo $sources_finished + 1 | bc)
         sources_failure=$(echo $sources_failure + 1 | bc)
-        if ! [ "$backupemailfailure" = "0" ] && [ "$source_destloop[$source_index]" -eq 0 ]; then
+        if ! [ "$backupemailfailure" = "0" ] && [ "${source_destloop[$source_index]}" -eq 0 ]; then
 	  backup_source_failure_report
         fi
       fi
-      if [ "$source_destloop[$source_index]" -eq 0 ]; then
+      if [ "${source_destloop[$source_index]}" -eq 0 ]; then
         source_log[$source_index]=$log
       else
         source_log[$source_index]=
