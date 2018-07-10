@@ -16,8 +16,6 @@
 #  You should have received a copy of the GNU General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-#  $Id$
-#
 #  MAKE SURE YOU UNDERSTAND THIS SCRIPT BEFORE YOU USE IT!
 #  I AM NOT RESPONSIBLE FOR LOSS OF DATA!
 #
@@ -75,8 +73,7 @@ backuprsyncargs="-vaRn --itemize-changes --delete --delete-excluded"
 # Checksum
 #backuprsyncargs="-vacR --itemize-changes --delete --delete-excluded"
 
-backupsshfsargs=""								# <--- Arguments to sshfs command --->
-backupsshargs=""								# <--- Arguments to ssh command --->
+#backupsshport="22"								# <--- Use a different SSH port for ssh/sshfs/rsync commands --->
 
 backupidfile=".RSYNCBACKUPID"							# <--- File touched to identify that the directory is a valid archive --->
 backuptsfile="RSYNCBACKUPTS"							# <--- Timestamp file placed in the archive directory to track which directory was used last time, HIDDEN FILE WONT WORK! --->
@@ -656,6 +653,10 @@ backup_loadconf() {
   debug "backupsources: $backupsources"
   debug "backupdestinations: $backupdestinations"
   debug "backupexcludeoneline: $backupexcludeoneline"
+  
+  if ! [ "$backupsshport" == "" ]; then
+    backup_ssh_args="-p $backupsshport"
+  fi
 
 }
 
@@ -811,7 +812,7 @@ backup_source_ssh() {
   waitprint=0
   while :
   do
-    ssh -o ConnectTimeout=3 -o BatchMode=yes $sourceuh echo "" >/dev/null 2>&1
+    ssh -o ConnectTimeout=3 -o BatchMode=yes $backup_ssh_args $sourceuh echo "" >/dev/null 2>&1
     if [ $? -eq 0 ]; then
       status "Backup source \"$sourcehost\" is up."
       break
@@ -832,7 +833,7 @@ backup_source_ssh() {
   sourcemountpoint="$backupmntdir/ssh-`hostname -s`-$sourcehost-$backupdate-$RANDOM"
   mkdir -p $sourcemountpoint || return 1
   statusnn "Connecting SSH source \"$sourcehost\" on \"$sourcemountpoint\"."
-  sshfs $backupsshfsargs ${sourceuh}:/ $sourcemountpoint || {
+  sshfs $backup_ssh_args ${sourceuh}:/ $sourcemountpoint || {
     error "Unable to connect to SSH source \"$sourcehost\"."
     rmdir $sourcemountpoint >/dev/null 2>&1;
     return 1;
@@ -1108,7 +1109,7 @@ backup_dest_ssh_mount() {
   #ssh $backupsshargs $desthost mkdir -p $destdir || return 1
   statusnn "Mounting destination \"$backupdest\" on \"$destmountpoint\"."
   mkdir -p $destmountpoint || { stopprint; return 1; }
-  sshfs $backupsshfsargs $backupdest $destmountpoint || {
+  sshfs $backup_ssh_args $backupdest $destmountpoint || {
     error "Unable to connect to backup destination \"$desthost\" (SSH)"
     rmdir $destmountpoint >/dev/null 2>&1
     return 1
@@ -1380,11 +1381,11 @@ backup_rsync() {
   $SED -i '/^$/d' $backupexcludestmpfile || { backup_failure_report_all; exit_failure; }
 
   if [ "$backuprun" -eq 1 ]; then
-    echo "Command: rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile
-    echo "Command: rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile_stdout
-    status "Running rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles ${desttargetfull}"
+    echo "Command: rsync $backuprsyncargs -e 'ssh -o BatchMode=yes ${backup_ssh_args}' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile
+    echo "Command: rsync $backuprsyncargs -e 'ssh -o BatchMode=yes ${backup_ssh_args}' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles $desttargetfull" >$backuplogtmpfile_stdout
+    status "Running rsync $backuprsyncargs -e 'ssh -o BatchMode=yes ${backup_ssh_args}' --exclude-from=$backupexcludestmpfile --log-file=$backuplogtmpfile $sourcefiles ${desttargetfull}"
     starttime=`date +%s`
-    rsync $backuprsyncargs -e 'ssh -o BatchMode=yes' --exclude-from="$backupexcludestmpfile" --log-file="$backuplogtmpfile" $sourcefiles $desttargetfull >$backuplogtmpfile_stdout || {
+    rsync $backuprsyncargs -e "ssh -o BatchMode=yes ${backup_ssh_args}" --exclude-from="$backupexcludestmpfile" --log-file="$backuplogtmpfile" $sourcefiles $desttargetfull >$backuplogtmpfile_stdout || {
       error "Rsync command failed for backup source \"$sourcehost\" destination \"$desthost\"."
       return 1
     }
