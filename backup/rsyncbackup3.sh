@@ -140,6 +140,7 @@ backupexclude="\
 /var/lib/dhcp/proc
 /var/lib/dhcp6/dev
 /var/lib/dhcp6/proc
+/var/lib/docker
 /mnt/*/backup*
 /mnt/*/Backup*
 /home/*/temp
