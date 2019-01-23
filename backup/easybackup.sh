@@ -16,7 +16,6 @@
 #  You should have received a copy of the GNU General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-#  $Id$
 #
 # This is a very BASIC terminal rsync backup script.
 # You must understand basic shell scripts and rsync.
@@ -151,7 +150,7 @@ backup_init() {
 
   # See if the system has the needed commands to continue.
 
-  for cmd in "which" "ls" "mkdir" "mv" "cp" "rm" "sed" "awk" "bc" "tr" "date" "md5sum" "udisks" "mount" "blkid"
+  for cmd in "which" "ls" "mkdir" "mv" "cp" "rm" "sed" "awk" "bc" "tr" "date" "md5sum" "udisksctl" "mount" "blkid"
   do
     which $cmd >/dev/null 2>&1
     if [ $? != 0 ] ; then
@@ -252,33 +251,33 @@ backup_device() {
   found=0
 
   while true; do
-  for i in $backupdisks
-  do
-    IFS=$'\n'
-    for x in `blkid`
+    for i in $backupdisks
     do
-      device=`echo $x | awk '{print $1}' | sed 's/://g'`
-      label=`echo $x | awk '{print $2}'`
-      echo $label | grep '^LABEL=".*"$' >/dev/null 2>&1
-      if ! [ $? = 0 ]; then
-        continue
-      fi
-      label=`echo $label | sed 's/LABEL=//g' | sed 's/"//g'`
-      if [ "$label" = "$i" ]; then
-        found=1
+      IFS=$'\n'
+      for x in `blkid`
+      do
+        device=`echo $x | awk '{print $1}' | sed 's/://g'`
+        label=`echo $x | awk '{print $2}'`
+        echo $label | grep '^LABEL=".*"$' >/dev/null 2>&1
+        if ! [ $? = 0 ]; then
+          continue
+        fi
+        label=`echo $label | sed 's/LABEL=//g' | sed 's/"//g'`
+        if [ "$label" = "$i" ]; then
+          found=1
+          break
+        fi
+      done
+      IFS=$' \t\n'
+      if [ "$found" = "1" ]; then
         break
       fi
     done
-    IFS=$' \t\n'
-    if [ "$found" = "1" ]; then
-      break
+    if ! [ "$found" = "1" ]; then
+      read -e -n 1 -p "Insert backupdisk with labels \"$backupdisks\" and press any key to try again."
+      continue
     fi
-  done
-  if ! [ "$found" = "1" ]; then
-    read -e -n 1 -p "Insert backupdisk with labels \"$backupdisks\" and press any key to try again."
-    continue
-  fi
-  break
+    break
   done
 
   echo "Using backupdisk \"$label\": \"$device\"."
@@ -293,12 +292,17 @@ backup_mount() {
   mount=`mount | grep "^${device}"`
   if [ "$mount" = "" ]; then
     echo $n "Mounting \"$device\". $c"
-    udisks --mount $device || continue
+    udisksctl mount -b $device || {
+      echo "ERROR: Unable to mount \"$device\"."
+      backup_exit
+      exit 1
+    }
     # udisks may return 0 even when it's not mounted.
     mount=`mount | grep ^${device}.*`
     if [ "$mount" = "" ]; then
       echo "Failed."
-      continue
+      backup_exit
+      exit 1
     fi
     mountpoint=`echo $mount | awk '{print $3}'`
     if [ "$mountpoint" = "" ]; then
