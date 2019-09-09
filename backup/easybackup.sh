@@ -99,7 +99,10 @@ backupexclude="\
 /home/*/.wine_*
 /home/*/.kde4/share/apps/nepomuk
 /home/*/.kde/share/apps/amarok/albumcovers/cache
+/home/*/VirtualBox
+/mnt/data/Images
 /mnt/data/Backup
+/mnt/data/Xerox
 "
 
 ##################### DONT CHANGE ANYTHING BELOW HERE #####################
