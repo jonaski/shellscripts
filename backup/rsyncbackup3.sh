@@ -25,7 +25,7 @@
 #  backuparchives="Day`date '+%w'`"
 #
 #  Settings "backuparchives" to "" will rsync the files directly
-#  into the path sepcified in backuplocation.
+#  into the path specified in backuplocation.
 #
 # rsync options:
 #
@@ -44,7 +44,7 @@ backupconfig="/etc/sysconfig/rsyncbackup3"
 
 #
 # All variables below will be overwritten by the configuration file.
-# To configure this script, copy what you want to change below and put it in a seperate file, ie: /etc/sysconfig/rsyncbackup3
+# To configure this script, copy what you want to change below and put it in a separate file, ie: /etc/sysconfig/rsyncbackup3
 #
 
 backuphost="`hostname -s`"							# <--- Hostname of this machine --->
@@ -96,7 +96,7 @@ backupsourceconnectttl=172800							# <--- How long time in seconds to wait for 
 
 # One or more sources that you want to backup.
 # Syntax are, Local: /home or SSH(SFTP): host:/home
-# Use comma to seperate each file/directory to backup.
+# Use comma to separate each file/directory to backup.
 # Files/directories specified with '-' in front will be exceptions.
 
 backupsources="\

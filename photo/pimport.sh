@@ -327,18 +327,18 @@ do
   echo "Done."
   logfile "Copied \"$cdir/$imagename\" to tempdir \"$tempdir/$imagename\"." 1
 
-  # Dermine orientation
+  # Determine orientation
 
   #exif=`exiftool -Orientation -n "$tempdir/$imagename"` || fail
   #if [ "$exif" = "" ] ; then
-  #  logfile "ERROR: Cannot dermine orientation for image: \"$tempdir/$imagename\"." 2
+  #  logfile "ERROR: Cannot determine orientation for image: \"$tempdir/$imagename\"." 2
   #  read -e -n 1 -p "" answer
   #  exit 1
   #fi
   #orientation=`echo $exif | awk '{print $3}'` || fail
   orientation=`identify -format '%[exif:orientation]' "$tempdir/$imagename"`
   if [ "$orientation" = "" ] ; then
-    logfile "ERROR: Cannot dermine orientation for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine orientation for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
@@ -352,7 +352,7 @@ do
       echo "Done."
       orientation=`identify -format '%[exif:orientation]' "$tempdir/$imagename"`
       if [ "$orientation" = "" ] ; then
-        logfile "ERROR: Cannot dermine orientation for image: \"$tempdir/$imagename\"." 2
+        logfile "ERROR: Cannot determine orientation for image: \"$tempdir/$imagename\"." 2
         read -e -n 1 -p "" answer
         exit 1
       fi
@@ -378,13 +378,13 @@ do
   #  fi
   #fi
 
-  # Dermine date
+  # Determine date
 
   #echo $n "Dermining date for image \"$tempdir/$imagename\". $c"
 
   exif=`exiv2 "$tempdir/$imagename" | grep -a "^Image timestamp :"`
   if [ "$exif" = "" ] ; then
-    logfile "ERROR: Cannot dermine date for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine date for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
@@ -392,7 +392,7 @@ do
 
   date=`echo $exif | awk '{print $4}'` || fail
   if [ "$date" = "" ] ; then
-    logfile "ERROR: Cannot dermine date for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine date for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
@@ -400,27 +400,27 @@ do
 
   time=`echo $exif | awk '{print $5}'` || fail
   if [ "$date" = "" ] ; then
-    logfile "ERROR: Cannot dermine time for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine time for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
 
   date=`echo $date |  sed 's/://g'` || fail
   if [ "$date" = "" ] ; then
-    logfile "ERROR: Cannot dermine date for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine date for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
   time=`echo $time |  sed 's/://g'` || fail
   if [ "$date" = "" ] ; then
-    logfile "ERROR: Cannot dermine date for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine date for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
   
   dir=$date
 
-  # Dermine the image format and geometry for use in the filename.
+  # Determine the image format and geometry for use in the filename.
 
   echo $n "Dermining format and geometry for image \"$tempdir/$imagename\". $c"
   
@@ -430,19 +430,19 @@ do
   #identify=`echo $identifyfake | sed "s/${cdirfake}:${imagename} //g"`
 
   if [ "$identify" = "" ] ; then
-    logfile "ERROR: Cannot dermine format and geometry for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine format and geometry for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
   format=`echo $identify | awk '{print $2}'` || fail
   if [ "$format" = "" ] ; then
-    logfile "ERROR: Cannot dermine format for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine format for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
   extension=`echo $format | tr 'A-Z' 'a-z'` || fail
   if [ "$extension" = "" ] ; then
-    logfile "ERROR: Cannot dermine extension for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine extension for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
@@ -451,7 +451,7 @@ do
   esac
   geometry=`echo $identify | awk '{print $3}'` || fail
   if [ "$geometry" = "" ] ; then
-    logfile "ERROR: Cannot dermine geometry for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine geometry for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
@@ -460,13 +460,13 @@ do
   # we need to get rid of the plus (+) and the x characters:
   width=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $1}'` || fail
   if [ "$width" = "" ] ; then
-    logfile "ERROR: Cannot dermine width for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine width for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
   height=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $2}'` || fail
   if [ "$height" = "" ] ; then
-    logfile "ERROR: Cannot dermine height for image: \"$tempdir/$imagename\"." 2
+    logfile "ERROR: Cannot determine height for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
@@ -495,14 +495,14 @@ do
       # Make sure we dont overwrite another image.
       md5sum1=`md5sum "$destdir/$dir/$newname" | awk '{print $1}'`
       if [ "$md5sum1" = "" ]; then
-        logfile "ERROR: Cannot dermine md5sum for image: \"$destdir/$dir/$newname\"." 2
+        logfile "ERROR: Cannot determine md5sum for image: \"$destdir/$dir/$newname\"." 2
         rm -f "$tempdir/$imagename"
         read -e -n 1 -p "" answer
         exit 1
       fi
       md5sum2=`md5sum "$tempdir/$imagename" | awk '{print $1}'`
       if [ "$md5sum2" = "" ]; then
-        logfile "ERROR: Cannot dermine md5sum for image: \"$tempdir/$imagename\"." 2
+        logfile "ERROR: Cannot determine md5sum for image: \"$tempdir/$imagename\"." 2
         rm -f "$tempdir/$imagename"
         read -e -n 1 -p "" answer
         exit 1

@@ -192,22 +192,22 @@ do
 
     imagename=`echo $imagenamefake | sed 's/:/\ /g'`
 
-    # Dermine the image format and geometry for use in the filename.
+    # Determine the image format and geometry for use in the filename.
 
     #echo $n "Dermining format and geometry for image \"$pdir/$ddir/$imagename\". $c"
     identify=`identify "$pdir/$ddir/$imagename" | sed "s/${pdir}\/${ddir}\/${imagename} //g"` || exit 1
     if [ "$identify" = "" ] ; then
-      logfile "ERROR: Cannot dermine format and geometry for image: \"$pdir/$ddir/$imagename\"." 2
+      logfile "ERROR: Cannot determine format and geometry for image: \"$pdir/$ddir/$imagename\"." 2
       continue
     fi
     format=`echo $identify | awk '{print $1}'` || exit 1
     if [ "$format" = "" ] ; then
-      logfile "ERROR: Cannot dermine format for image: \"$pdir/$ddir/$imagename\"." 2
+      logfile "ERROR: Cannot determine format for image: \"$pdir/$ddir/$imagename\"." 2
       continue
     fi
     extension=`echo $format | tr 'A-Z' 'a-z'` || exit 1
     if [ "$extension" = "" ] ; then
-      logfile "ERROR: Cannot dermine extension for image: \"$pdir/$ddir/$imagename\"." 2
+      logfile "ERROR: Cannot determine extension for image: \"$pdir/$ddir/$imagename\"." 2
       continue
     fi
     case "$extension" in
@@ -215,7 +215,7 @@ do
     esac
     geometry=`echo $identify | awk '{print $2}'` || exit 1
     if [ "$geometry" = "" ] ; then
-      logfile "ERROR: Cannot dermine geometry for image: \"$pdir/$ddir/$imagename\"." 2
+      logfile "ERROR: Cannot determine geometry for image: \"$pdir/$ddir/$imagename\"." 2
       continue
     fi
 
@@ -223,22 +223,22 @@ do
     # we need to get rid of the plus (+) and the x characters:
     width=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $1}'` || exit 1
     if [ "$width" = "" ] ; then
-      logfile "ERROR: Cannot dermine width for image: \"$pdir/$ddir/$imagename\"." 2
+      logfile "ERROR: Cannot determine width for image: \"$pdir/$ddir/$imagename\"." 2
       continue
     fi
     height=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $2}'` || exit 1
     if [ "$height" = "" ] ; then
-      logfile "ERROR: Cannot dermine height for image: \"$pdir/$ddir/$imagename\"." 2
+      logfile "ERROR: Cannot determine height for image: \"$pdir/$ddir/$imagename\"." 2
       continue
     fi
     #echo "$format $geometry"
     
-    # Dermine image date for use in filename
+    # Determine image date for use in filename
     
     #echo $n "Dermining date for image \"$pdir/$ddir/$imagename\". $c"
     date=`identify -format "%[exif:DateTimeOriginal]" "$pdir/$ddir/$imagename" | sed 's/\://g' | sed 's/ /-/g'` || exit 1
     if [ "$date" = "" ] ; then
-      logfile "ERROR: Cannot dermine date for image: \"$pdir/$ddir/$imagename\"." 2
+      logfile "ERROR: Cannot determine date for image: \"$pdir/$ddir/$imagename\"." 2
       continue
     fi
     #echo "$date"
