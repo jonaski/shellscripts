@@ -1,4 +1,4 @@
-:floppy_disk: Unix Shell Scripts
+:shell: Unix Shell Scripts
 ================================
 
 These are some of the various unix shell scripts I've made over the years.
