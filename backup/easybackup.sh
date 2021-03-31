@@ -34,11 +34,10 @@
 #
 
 version="0.2.5"
-revision="20160724"
 
 rsyncargs="-va --delete --delete-excluded --itemize-changes"
 rsyncargsdry="-van --delete --delete-excluded --itemize-changes"
-logfile="/tmp/easybackup-$RANDOM.log"
+logfile="/tmp/easybackup-${RANDOM}.log"
 backupexclude="\
 /tmp
 /dev
@@ -145,7 +144,7 @@ backup_init() {
 
   c=''
   n=''
-  if [ "`eval echo -n 'a'`" = "-n a" ] ; then
+  if [ "$(eval echo -n 'a')" = "-n a" ] ; then
     c='\c'
   else
     n='-n'
@@ -166,15 +165,13 @@ backup_init() {
   # Parse parameters
 
   script=$(echo "$0" | sed 's/.*\///g')
-  runpath=$(echo "$0" | sed 's/\(.*\)\/.*/\1/')
 
-  while getopts hvdRcp:l: o
+  while getopts hvRcp:l: o
   do case "$o" in
     h)  echo "Usage: $script -hvdpl <Source directories> <Backupdisk labels>"
         echo ""
         echo "-h     Display this help and exit"
         echo "-v     Display script version and exit"
-        echo "-d     Debugmode"
         echo "-p     Backup directory on backup disk, ie.: /Backup"
         echo "-l     Logfile"
         echo "-R     Relative names (rsync -R)"
@@ -187,27 +184,26 @@ backup_init() {
         echo ""
         exit 0;;
     v)  echo "$script v$version"; backup_exit; exit 0;;
-    d)  backupdebug=1;;
     p)  backupdir="$OPTARG";;
     l)  logfile="$OPTARG";;
-    c)  checksum=1; rsyncargs="$rsyncargs -c"; rsyncargsdry="$rsyncargsdry -c";;
-    R)  relative=1; rsyncargs="$rsyncargs -R"; rsyncargsdry="$rsyncargsdry -R";;
+    c)  rsyncargs="$rsyncargs -c"; rsyncargsdry="$rsyncargsdry -c";;
+    R)  rsyncargs="$rsyncargs -R"; rsyncargsdry="$rsyncargsdry -R";;
     \?)  echo "ERROR: Unknown option: $script -h for help."; backup_exit; exit 1;;
   esac
   done
   # Reset $@
-  shift `echo $OPTIND-1 | bc`
+  shift "$(echo $OPTIND-1 | bc)"
   
-  params="$@"
+  params="$*"
   for param in $params ; do    
-    echo $param | grep '/' >/dev/null 2>&1
+    echo "$param" | grep '/' >/dev/null 2>&1
     if [ $? = 0 ]; then
       if ! [ "$backupdisks" = "" ]; then
         echo "ERROR: You need to specify backup source directory before backup disk labels."
         backup_exit
         exit 1
       fi
-      ls $param >/dev/null 2>&1
+      ls "$param" >/dev/null 2>&1
       if ! [ $? -eq 0 ] ; then
         echo "ERROR: File $param does not exist!."
         backup_exit
@@ -242,9 +238,9 @@ backup_init() {
   echo "Source: $backupsource"
   echo "Backupdisks: $backupdisks"
 
-  rm -f $backupexcludestmpfile
+  rm -f "$backupexcludestmpfile"
   
-  backupexcludestmpfile="/tmp/easybackup-excludes-$RANDOM.txt"
+  backupexcludestmpfile="/tmp/easybackup-excludes-${RANDOM}.txt"
   echo "$backupexclude" >$backupexcludestmpfile || { backup_exit; }
 
 }
@@ -257,15 +253,15 @@ backup_device() {
     for i in $backupdisks
     do
       IFS=$'\n'
-      for x in `blkid`
+      for x in $(blkid)
       do
-        device=`echo $x | awk '{print $1}' | sed 's/://g'`
-        label=`echo $x | awk '{print $2}'`
-        echo $label | grep '^LABEL=".*"$' >/dev/null 2>&1
+        device=$(echo "$x" | awk '{print $1}' | sed 's/://g')
+        label=$(echo "$x" | awk '{print $2}')
+        echo "$label" | grep '^LABEL=".*"$' >/dev/null 2>&1
         if ! [ $? = 0 ]; then
           continue
         fi
-        label=`echo $label | sed 's/LABEL=//g' | sed 's/"//g'`
+        label=$(echo "$label" | sed 's/LABEL=//g' | sed 's/"//g')
         if [ "$label" = "$i" ]; then
           found=1
           break
@@ -292,22 +288,22 @@ backup_mount() {
   mountpoint=
   mounted=
   automounted=
-  mount=`mount | grep "^${device}"`
+  mount=$(mount | grep "^${device}")
   if [ "$mount" = "" ]; then
     echo $n "Mounting \"$device\". $c"
-    udisksctl mount -b $device || {
+    udisksctl mount -b "$device" || {
       echo "ERROR: Unable to mount \"$device\"."
       backup_exit
       exit 1
     }
     # udisks may return 0 even when it's not mounted.
-    mount=`mount | grep ^${device}.*`
+    mount=$(mount | grep ^${device}.*)
     if [ "$mount" = "" ]; then
       echo "Failed."
       backup_exit
       exit 1
     fi
-    mountpoint=`echo $mount | awk '{print $3}'`
+    mountpoint=$(echo "$mount" | awk '{print $3}')
     if [ "$mountpoint" = "" ]; then
       echo "Failed to find mountpoint."
       echo "ERROR: Unable to find mountpoint for \"$device\"."
@@ -318,7 +314,7 @@ backup_mount() {
     #echo "$mountpoint."
   else
     echo $n "Probing \"$device\". $c"
-    mountpoint=`echo $mount | awk '{print $3}'`
+    mountpoint=$(echo "$mount" | awk '{print $3}')
     if [ "$mountpoint" = "" ]; then
       echo "Failed to find mountpoint."
       echo "ERROR: Unable to find mountpoint for \"$device\"."
@@ -335,7 +331,7 @@ backup_mount() {
   if [ "$backupdir" = "" ]; then
     backupdst=$mountpoint
   else
-    echo $backupdir | grep '^/.*$' >/dev/null 2>&1
+    echo "$backupdir" | grep '^/.*$' >/dev/null 2>&1
     if [ $? = 0 ]; then
       backupdst=${mountpoint}${backupdir}
     else
@@ -376,7 +372,7 @@ backup_dryrun() {
   done
 
   while true; do
-    read -e -n 1 -p "Running rsync -n $rsyncargsdry --exclude-from="$backupexcludestmpfile" $backupsource $backupdst (DRY RUN), continue? (Y/N) " answer
+    read -e -n 1 -p "Running rsync -n "$rsyncargsdry" --exclude-from="$backupexcludestmpfile" $backupsource $backupdst (DRY RUN), continue? (Y/N) " answer
     case $answer in
       [Yy]* ) break;;
       [Nn]* ) backup_exit; exit 1;;
@@ -387,14 +383,14 @@ backup_dryrun() {
   echo "BACKUPSOURCE: $backupsource"
   echo "BACKUPDST: $backupdst"
 
-  echo "COMMAND: rsync -n $rsyncargsdry --exclude-from=$backupexcludestmpfile $backupsource $backupdst" >>$logfile
-  rsync -n $rsyncargsdry --exclude-from="$backupexcludestmpfile" $backupsource $backupdst 2>&1 | tee -a $logfile
+  echo "COMMAND: rsync -n $rsyncargsdry --exclude-from=$backupexcludestmpfile $backupsource $backupdst" >>"$logfile"
+  rsync -n $rsyncargsdry --exclude-from="$backupexcludestmpfile" "$backupsource" "$backupdst" 2>&1 | tee -a "$logfile"
 
   while true; do
     read -e -n 1 -p "Dry run complete, view logfile ($logfile). (Y/N) " answer
     case $answer in
       [Yy]* )
-              kate $logfile >/dev/null 2>&1 &
+              kate "$logfile" >/dev/null 2>&1 &
               break;;
       [Nn]* ) break;;
       * ) echo "Invalid answer. Press Y or N.";;
@@ -425,8 +421,8 @@ backup_run() {
     esac
   done
 
-  echo "COMMAND: rsync $rsyncargs --exclude-from=$backupexcludestmpfile $backupsource $backupdst" >>$logfile
-  rsync $rsyncargs --exclude-from="$backupexcludestmpfile" $backupsource $backupdst 2>&1 | tee -a $logfile
+  echo "COMMAND: rsync $rsyncargs --exclude-from=$backupexcludestmpfile $backupsource $backupdst" >>"$logfile"
+  rsync "$rsyncargs" --exclude-from="$backupexcludestmpfile" "$backupsource" "$backupdst" 2>&1 | tee -a "$logfile"
 
   return 0
 
@@ -451,7 +447,7 @@ backup_exit() {
 
   rm -f $backupexcludestmpfile
   if [ "$automounted" = "1" ]; then
-    umount $device
+    umount "$device"
   fi
   read -e -n 1 -p "Press any key to exit..."
   exit 0
@@ -459,7 +455,7 @@ backup_exit() {
 }
 
 backup_logo || exit 1
-backup_init $@ || exit 1
+backup_init "$@" || exit 1
 backup_device || exit 1
 backup_mount || exit 1
 backup_confirm || exit 1
