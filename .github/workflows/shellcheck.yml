@@ -18,5 +18,18 @@ jobs:
         run: |
           set -x
           for i in $(find . -type f -name '*.sh'); do
-            shellcheck -s bash --exclude=SC2181 --exclude=SC1090 --exclude=SC2006 --exclude=SC2086 --exclude=SC2044 --exclude=SC2045 --exclude=SC2001 $i
+            shellcheck -s bash --exclude=SC2181 \
+                               --exclude=SC1090 \
+                               --exclude=SC2006 \
+                               --exclude=SC2086 \
+                               --exclude=SC2044 \
+                               --exclude=SC2045 \
+                               --exclude=SC2001 \
+                               --exclude=SC2162 \
+                               --exclude=SC2035 \
+                               --exclude=SC2034 \
+                               --exclude=SC2029 \
+                               --exclude=SC2062 \
+                               --exclude=SC2153 \
+                               $i
           done
