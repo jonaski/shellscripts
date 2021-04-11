@@ -192,7 +192,7 @@ backup_init() {
   esac
   done
   # Reset $@
-  shift "$(echo $OPTIND-1 | bc)"
+  shift "$(echo "$OPTIND" - 1 | bc)"
   
   params="$*"
   for param in $params ; do    
@@ -372,7 +372,7 @@ backup_dryrun() {
   done
 
   while true; do
-    read -e -n 1 -p "Running rsync -n "$rsyncargsdry" --exclude-from="$backupexcludestmpfile" $backupsource $backupdst (DRY RUN), continue? (Y/N) " answer
+    read -e -n 1 -p "Running rsync -n $rsyncargsdry --exclude-from=$backupexcludestmpfile $backupsource $backupdst (DRY RUN), continue? (Y/N) " answer
     case $answer in
       [Yy]* ) break;;
       [Nn]* ) backup_exit; exit 1;;
@@ -413,7 +413,7 @@ backup_dryrun() {
 backup_run() {
 
   while true; do
-    read -e -n 1 -p "Run rsync $rsyncargs --exclude-from="$backupexcludestmpfile" $backupsource $backupdst, continue? (Y/N) " answer
+    read -e -n 1 -p "Run rsync $rsyncargs --exclude-from=$backupexcludestmpfile $backupsource $backupdst, continue? (Y/N) " answer
     case $answer in
       [Yy]* ) break;;
       [Nn]* ) backup_exit; exit 1;;

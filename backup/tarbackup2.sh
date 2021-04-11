@@ -19,6 +19,26 @@
 
 backupversion="2.1.1"
 
+backupid=$(hostname -s)
+backupdate=$(date '+%Y%m%d-%H%M%S')
+
+backupsshfsargs=
+filelocation=
+backupexclude=
+backupmountpoint=
+backupmysqlcmd=
+backuppgsqlcmd=
+backupfileprefix=
+backupold2keep=
+backupmysqlfileprefix=
+backuppgsqlfileprefix=
+backupemailsuccess=
+backupemailfailure=
+backupemailfailureall=
+backupfilerevision=
+backupmysqlfilerevision=
+backuppgsqlfilerevision=
+
 # Functions below here
 
 backup_local() {
@@ -565,7 +585,7 @@ esac
 done
 
 # Reset $@
-shift $(echo $OPTIND-1 | bc)
+shift "$(echo "$OPTIND" - 1 | bc)"
 
 # Locate configuration file
 
