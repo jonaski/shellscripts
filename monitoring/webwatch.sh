@@ -22,7 +22,7 @@ lockfile="/tmp/webwatch.lock"
 lockfilettl=3600
 tmpfile="/tmp/webwatch.tmp"
 logfile="/tmp/webwatch.log"
-log=1
+#log=1
 debug=1
 inettesthosts="8.8.8.8 8.8.4.4"			# Test all of these, only if 1 fails internet is reported to be down.
 pingtimeout=2
@@ -45,9 +45,9 @@ print() {
   timestamp
   if [ -t 1 ] && ! [ "$color" = "" ]; then
     tput bold
-    tput setaf $color
+    tput setaf "$color"
   fi
-  echo "[$TS] $@"
+  echo "[$TS] $*"
   if [ -t 1 ]; then
     tput sgr0
   fi
@@ -55,30 +55,30 @@ print() {
 }
 log() {
   timestamp
-  echo "[$TS] $@" >>${logfile}
+  echo "[$TS] $*" >>${logfile}
 }
-statusprint() { color=8; print $@; }
-statuslog() { log $@; }
+statusprint() { color=8; print "$@"; }
+statuslog() { log "$@"; }
 errorprint() {
   timestamp
   if [ -t 1 ]; then
     tput bold
     tput setaf 1
   fi
-  echo "[$TS] ERROR: $@" >&2
+  echo "[$TS] ERROR: $*" >&2
   if [ -t 1 ]; then
     tput sgr0
   fi
   color=0
 }
-errorlog() { log "ERROR: $@"; }
-status() { statusprint $@; statuslog $@; }
-error() { errorprint $@; errorlog $@; }
+errorlog() { log "ERROR: $*"; }
+status() { statusprint "$@"; statuslog "$@"; }
+error() { errorprint "$@"; errorlog "$@"; }
 debug() {
   if [ "$debug" = "1" ]; then
     color=3
-    print $@
-    log $@
+    print "$@"
+    log "$@"
   fi
 }
 
@@ -102,7 +102,7 @@ loadconfig() {
 
 main() {
 
-  init $@
+  init "$@"
   
   cmdcheck
   inetstatus
@@ -113,7 +113,7 @@ main() {
   fi
 
   scriptend=$(date +%s)
-  scripttime=$(echo $scriptend - $scriptstart | bc)
+  scripttime=$(echo "$scriptend" - "$scriptstart" | bc)
   status "Script finished in $(date -u -d @${scripttime} +"%T")"
   
   exit_safe 0
@@ -166,7 +166,7 @@ cmdcheck() {
   cmds="which cat cut tr sed grep bc cp mv rm mkdir date hostname mail ssh tput ping curl mutt"
   for cmd in $cmds
   do
-    which $cmd >/dev/null 2>&1
+    which "$cmd" >/dev/null 2>&1
     if [ $? != 0 ] ; then
       echo "ERROR: Missing \"${cmd}\" command!"
       exit_safe 1
@@ -181,7 +181,7 @@ inetstatus() {
 
   debug "inetstatus()"
 
-  inetwasdown=
+  #inetwasdown=
   inetwasdowntext=
   
   inetup=0
@@ -199,20 +199,20 @@ inetstatus() {
     status "Internet connection found to be up."
     entry=$(grep -i "INETDOWN Time=.*" ${tmpfile})
     if ! [ "$entry" = "" ]; then
-      inetwasdown=1
+      #inetwasdown=1
       #rm -f ${tmpfile} || exit_safe 1
       #touch ${tmpfile} || exit_safe 1
       sed -i "/^INETDOWN .*$/d" ${tmpfile}
       timenow=$(date +%s)
-      entrytime=$(echo $entry | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
+      entrytime=$(echo "$entry" | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
       if isnum "$entrytime" ; then
-        time=$(echo $timenow - $entrytime | bc)
+        time=$(echo "$timenow" - "$entrytime" | bc)
         timetext=$(date -u -d @${time} +"%T")
         inetwasdowntext="Internet was down $timetext"
-        status $inetwasdowntext
+        status "$inetwasdowntext"
       else
         inetwasdowntext="Internet was down - Failed to calculate downtime."
-        status $inetwasdowntext
+        status "$inetwasdowntext"
         entrytime=0
       fi
     fi
@@ -247,11 +247,11 @@ webwatch() {
     if [ "$l" = "" ]; then
       continue
     fi
-    url=$(echo $l | awk '{print $1}')
+    url=$(echo "$l" | awk '{print $1}')
     if [ "$url" = "" ]; then
         continue
     fi
-    url2=$(echo $url | sed 's/\//\\\//g')
+    url2=$(echo "$url" | sed 's/\//\\\//g')
     match=$(echo "$l" | cut -d ' ' -f2-)
     if [ "$match" = "" ]; then
       continue
@@ -260,18 +260,18 @@ webwatch() {
     status=
     result=
     fail=0
-    output=$(curl -sSf --insecure $url 2>&1)
+    output=$(curl -sSf --insecure "$url" 2>&1)
     if ! [ $? -eq 0 ]; then
       exitstatus=$?
       status="down"
-      result=$(echo $output | sed 's/curl: (.*) //g')
+      result=$(echo "$output" | sed 's/curl: (.*) //g')
       result_html="<font color=\"red\">${result} <br /> ${exitstatus}</font>"
       fail=1
       if [ "$failtime" -le 1 ]; then
 	failtime=$(date +%s)
       fi
     else
-      curl -sSf --insecure $url | grep -i "$match" >/dev/null 2>&1
+      curl -sSf --insecure "$url" | grep -i "$match" >/dev/null 2>&1
       if [ $? -eq 0 ]; then
         status="up"
         result="Up and running"
@@ -316,20 +316,20 @@ readfile() {
   if [ "$entry" = "" ]; then
     return
   fi
-  entrystatus=$(echo $entry | cut -d' ' -f2)
+  entrystatus=$(echo "$entry" | cut -d' ' -f2)
   if [ "$entrystatus" = "" ]; then
     entry=
     return
   fi
   
-  entryresult=$(echo $entry | cut -d' ' -f3)
+  entryresult=$(echo "$entry" | cut -d' ' -f3)
   if [ "$entryresult" = "" ]; then
     entry=
     entrystatus=
     return
   fi
 
-  entryfail=$(echo $entry | cut -d' ' -f4)
+  entryfail=$(echo "$entry" | cut -d' ' -f4)
   if [ "$entryfail" = "" ] || ! isnum "$entryfail"; then
     entry=
     entrystatus=
@@ -338,7 +338,7 @@ readfile() {
     return
   fi
 
-  failtime=$(echo $entry | cut -d' ' -f5)
+  failtime=$(echo "$entry" | cut -d' ' -f5)
   if [ "$failtime" = "" ] || ! isnum "$failtime"; then
     entry=
     entrystatus=
@@ -348,7 +348,7 @@ readfile() {
     return
   fi
 
-  reporttime=$(echo $entry | cut -d' ' -f6)
+  reporttime=$(echo "$entry" | cut -d' ' -f6)
   if [ "$reporttime" = "" ] || ! isnum "$reporttime"; then
     entry=
     entrystatus=
@@ -359,7 +359,7 @@ readfile() {
     return
   fi
 
-  entrytime=$(echo $entry | cut -d' ' -f7)
+  entrytime=$(echo "$entry" | cut -d' ' -f7)
   if [ "$entrytime" = "" ] ||  ! isnum "$entrytime"; then
     entry=
     entrystatus=
@@ -372,7 +372,7 @@ readfile() {
   fi
   
   timenow=$(date +%s)
-  time=$(echo $timenow - $entrytime | bc)
+  time=$(echo "$timenow" - "$entrytime" | bc)
 debug "Entry with timestamp \"${entrytime}\" ($(date -u -d @${time} +"%T") ago) found for URL \"$url\". Status: $entrystatus Result: $entryresult Fail: $entryfail FailTime: $failtime ReportTime: $reporttime"
   
   debug "readfile() finished"
@@ -384,7 +384,7 @@ writefile() {
   debug "writefile()"
   
   result_nospace=$(echo "$result" | sed 's/ /_/g')
-  echo $entry | grep -i "^${url} ${status} .*" >/dev/null 2>&1
+  echo "$entry" | grep -i "^${url} ${status} .*" >/dev/null 2>&1
   if [ $? -eq 0 ]; then
     changed=0
   else
@@ -393,8 +393,8 @@ writefile() {
   debug "URL: ${url} - Changed=$changed"
 
   timenow=$(date +%s)
-  failtime_bc=$(echo $timenow - $failtime | bc)
-  reporttime_bc=$(echo $timenow - $reporttime | bc)
+  failtime_bc=$(echo "$timenow" - "$failtime" | bc)
+  reporttime_bc=$(echo "$timenow" - "$reporttime" | bc)
 
   if [ "$entry" = "" ]; then
     entrytime=$(date +%s)
@@ -461,7 +461,7 @@ sendreport() {
   status "Sending monitor web watch report..."
 
   scriptend=$(date +%s)
-  scripttime=$(echo $scriptend - $scriptstart | bc)
+  scripttime=$(echo "$scriptend" - "$scriptstart" | bc)
   reporttime=$(date +%s)
 
   report_add "<html>"
@@ -488,5 +488,5 @@ EOT
 
 }
 
-main
+main "$@"
 exit_safe 0

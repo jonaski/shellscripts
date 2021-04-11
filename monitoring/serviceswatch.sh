@@ -22,7 +22,7 @@ lockfile="/tmp/serviceswatch.lock"
 lockfilettl=3600
 tmpfile="/tmp/serviceswatch.tmp"
 logfile="/tmp/serviceswatch.log"
-log=1
+#log=1
 debug=1
 inettesthosts="8.8.8.8 8.8.4.4"			# Test all of these, only if 1 fails internet is reported to be down.
 pingtimeout=2
@@ -46,9 +46,9 @@ print() {
   timestamp
   if [ -t 1 ] && ! [ "$color" = "" ]; then
     tput bold
-    tput setaf $color
+    tput setaf "$color"
   fi
-  echo "[$TS] $@"
+  echo "[$TS] $*"
   if [ -t 1 ]; then
     tput sgr0
   fi
@@ -56,30 +56,30 @@ print() {
 }
 log() {
   timestamp
-  echo "[$TS] $@" >>${logfile}
+  echo "[$TS] $*" >>${logfile}
 }
-statusprint() { color=8; print $@; }
-statuslog() { log $@; }
+statusprint() { color=8; print "$@"; }
+statuslog() { log "$@"; }
 errorprint() {
   timestamp
   if [ -t 1 ]; then
     tput bold
     tput setaf 1
   fi
-  echo "[$TS] ERROR: $@" >&2
+  echo "[$TS] ERROR: $*" >&2
   if [ -t 1 ]; then
     tput sgr0
   fi
   color=0
 }
-errorlog() { log "ERROR: $@"; }
-status() { statusprint $@; statuslog $@; }
-error() { errorprint $@; errorlog $@; }
+errorlog() { log "ERROR: $*"; }
+status() { statusprint "$@"; statuslog "$@"; }
+error() { errorprint "$@"; errorlog "$@"; }
 debug() {
   if [ "$debug" = "1" ]; then
     color=3
-    print $@
-    log $@
+    print "$@"
+    log "$@"
   fi
 }
 
@@ -104,7 +104,7 @@ loadconfig() {
 
 main() {
 
-  init $@
+  init "$@"
   
   cmdcheck
   inetstatus
@@ -115,7 +115,7 @@ main() {
   fi
 
   scriptend=$(date +%s)
-  scripttime=$(echo $scriptend - $scriptstart | bc)
+  scripttime=$(echo "$scriptend" - "$scriptstart" | bc)
   status "Script finished in $(date -u -d @${scripttime} +"%T")"
   
   exit_safe 0
@@ -139,12 +139,12 @@ init() {
   if [ $? -eq 0 ] ; then
     lockfile -r 0 -l $lockfilettl $lockfile || { exit_safe 1; }
   else
-    touch $lockfile || { exit_safe 1; }
+    touch "$lockfile" || { exit_safe 1; }
   fi
   havelockfile=1
 
-  touch $tmpfile || exit_safe 1
-  touch $logfile || exit_safe 1
+  touch "$tmpfile" || exit_safe 1
+  touch "$logfile" || exit_safe 1
 
 }
 
@@ -153,7 +153,7 @@ exit_safe() {
   debug "exit_safe()"
   
   if [ "$havelockfile" -eq 1 ]; then
-    rm -f $lockfile
+    rm -f "$lockfile"
   fi
 
   exit $?
@@ -168,7 +168,7 @@ cmdcheck() {
   cmds="which cat cut tr sed grep bc cp mv rm mkdir date hostname mail ssh tput ping mutt"
   for cmd in $cmds
   do
-    which $cmd >/dev/null 2>&1
+    which "$cmd" >/dev/null 2>&1
     if [ $? != 0 ] ; then
       echo "ERROR: Missing \"${cmd}\" command!"
       exit_safe 1
@@ -183,13 +183,13 @@ inetstatus() {
 
   debug "inetstatus()"
 
-  inetwasdown=
+  #inetwasdown=
   inetwasdowntext=
   
   inetup=0
   for inettesthost in $inettesthosts
   do
-    pingtext=$(ping -c 1 -W ${pingtimeout} ${inettesthost})
+    pingtext=$(ping -c 1 -W "${pingtimeout}" "${inettesthost}")
     r=$?
     if [ $r = 0 ] ; then
       inetup=1
@@ -201,20 +201,20 @@ inetstatus() {
     status "Internet connection found to be up."
     entry=$(grep -i "INETDOWN Time=.*" ${tmpfile})
     if ! [ "$entry" = "" ]; then
-      inetwasdown=1
+      #inetwasdown=1
       #rm -f ${tmpfile} || exit_safe 1
       #touch ${tmpfile} || exit_safe 1
       sed -i "/^INETDOWN .*$/d" ${tmpfile}
       timenow=$(date +%s)
-      entrytime=$(echo $entry | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
+      entrytime=$(echo "$entry" | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
       if isnum "$entrytime" ; then
-        time=$(echo $timenow - $entrytime | bc)
+        time=$(echo "$timenow" - "$entrytime" | bc)
         timetext=$(date -u -d @${time} +"%T")
         inetwasdowntext="Internet was down $timetext"
-        status $inetwasdowntext
+        status "$inetwasdowntext"
       else
         inetwasdowntext="Internet was down - Failed to calculate downtime."
-        status $inetwasdowntext
+        status "$inetwasdowntext"
         entrytime=0
       fi
     fi
@@ -241,7 +241,7 @@ serviceswatch() {
 
   debug "serviceswatch()"
 
-  i=0
+  #i=0
   IFS_DEFAULT=$IFS
   IFS=$'\n'
   for l in ${hosts}
@@ -251,13 +251,13 @@ serviceswatch() {
       continue
     fi
 
-    uhp=$(echo $l | awk '{ print $1}')
+    uhp=$(echo "$l" | awk '{ print $1}')
     services=$(echo "$l" | cut -d ' ' -f2-)
 
-    echo $uhp | grep '.:.' >/dev/null 2>&1
+    echo "$uhp" | grep '.:.' >/dev/null 2>&1
     if [ $? -eq 0 ]; then
-      userhost=$(echo $uhp | cut -d':' -f1)
-      port=$(echo $uhp | cut -d':' -f2)
+      userhost=$(echo "$uhp" | cut -d':' -f1)
+      port=$(echo "$uhp" | cut -d':' -f2)
       hostoptions="$options -p $port"
     else
       userhost=$uhp
@@ -265,10 +265,10 @@ serviceswatch() {
       hostoptions=$options
     fi
 
-    echo $userhost | grep '.@.' >/dev/null 2>&1
+    echo "$userhost" | grep '.@.' >/dev/null 2>&1
     if [ $? -eq 0 ]; then
-      user=$(echo $userhost | cut -d'@' -f1)
-      host=$(echo $userhost | cut -d'@' -f2)
+      user=$(echo "$userhost" | cut -d'@' -f1)
+      host=$(echo "$userhost" | cut -d'@' -f2)
     else
       user=root
       host=$userhost
@@ -286,7 +286,7 @@ serviceswatch() {
     
     for service in $services
     do
-      ssh $hostoptions $userhost systemctl status $service >/dev/null 2>&1
+      ssh "$hostoptions" "$userhost" systemctl status "$service" >/dev/null 2>&1
       if [ $? -eq 0 ]; then # Service is up
         status="up"
       elif [ $? = 3 ]; then # Service is down
@@ -337,13 +337,13 @@ readfile() {
   if [ "$entry" = "" ]; then
     return
   fi
-  entry_services_status=$(echo $entry | cut -d' ' -f2)
+  entry_services_status=$(echo "$entry" | cut -d' ' -f2)
   if [ "$entry_services_status" = "" ]; then
     entry=
     return
   fi
 
-  entryfail=$(echo $entry | cut -d' ' -f3)
+  entryfail=$(echo "$entry" | cut -d' ' -f3)
   if [ "$entryfail" = "" ] || ! isnum "$entryfail"; then
     entry=
     entry_services_status=
@@ -351,7 +351,7 @@ readfile() {
     return
   fi
 
-  failtime=$(echo $entry | cut -d' ' -f4)
+  failtime=$(echo "$entry" | cut -d' ' -f4)
   if [ "$failtime" = "" ] || ! isnum "$failtime"; then
     entry=
     entry_services_status=
@@ -360,7 +360,7 @@ readfile() {
     return
   fi
 
-  reporttime=$(echo $entry | cut -d' ' -f5)
+  reporttime=$(echo "$entry" | cut -d' ' -f5)
   if [ "$reporttime" = "" ] || ! isnum "$reporttime"; then
     entry=
     entry_services_status=
@@ -370,7 +370,7 @@ readfile() {
     return
   fi
 
-  entrytime=$(echo $entry | cut -d' ' -f6)
+  entrytime=$(echo "$entry" | cut -d' ' -f6)
   if [ "$entrytime" = "" ] ||  ! isnum "$entrytime"; then
     entry=
     entry_services_status=
@@ -382,7 +382,7 @@ readfile() {
   fi
   
   timenow=$(date +%s)
-  time=$(echo $timenow - $entrytime | bc)
+  time=$(echo "$timenow" - "$entrytime" | bc)
   debug "Entry with timestamp \"${entrytime}\" ($(date -u -d @${time} +"%T") ago) found for host \"$host\". Status: $entry_services_status Fail: $entryfail FailTime: $failtime ReportTime: $reporttime"
   
   debug "readfile() finished"
@@ -425,8 +425,8 @@ writefile() {
   fi
 
   timenow=$(date +%s)
-  failtime_bc=$(echo $timenow - $failtime | bc)
-  reporttime_bc=$(echo $timenow - $reporttime | bc)
+  failtime_bc=$(echo "$timenow" - "$failtime" | bc)
+  reporttime_bc=$(echo "$timenow" - "$reporttime" | bc)
 
   debug "Host: ${host} - Changed=$changed"
 
@@ -495,7 +495,7 @@ sendreport() {
   status "Sending monitor services watch report..."
 
   scriptend=$(date +%s)
-  scripttime=$(echo $scriptend - $scriptstart | bc)
+  scripttime=$(echo "$scriptend" - "$scriptstart" | bc)
   reporttime=$(date +%s)
 
   report_add "<html>"
@@ -524,5 +524,5 @@ EOT
 
 }
 
-main
+main "$@"
 exit_safe 0

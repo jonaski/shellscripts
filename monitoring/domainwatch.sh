@@ -22,11 +22,11 @@ lockfile="/tmp/domainwatch.lock"
 lockfilettl=3600
 tmpfile="/tmp/domainwatch.tmp"
 logfile="/tmp/domainwatch.log"
-log=1
+#log=1
 debug=1
 inettesthosts="8.8.8.8 8.8.4.4"			# Test all of these, only if 1 fails internet is reported to be down.
 pingtimeout=2
-maxfailtime=1
+#maxfailtime=1
 reportfreq=3600
 emailfrom="nobody"
 emailto="root"
@@ -39,9 +39,9 @@ print() {
   timestamp
   if [ -t 1 ] && ! [ "$color" = "" ]; then
     tput bold
-    tput setaf $color
+    tput setaf "$color"
   fi
-  echo "[$TS] $@"
+  echo "[$TS] $*"
   if [ -t 1 ]; then
     tput sgr0
   fi
@@ -49,30 +49,30 @@ print() {
 }
 log() {
   timestamp
-  echo "[$TS] $@" >>${logfile}
+  echo "[$TS] $*" >>"${logfile}"
 }
-statusprint() { color=8; print $@; }
-statuslog() { log $@; }
+statusprint() { color=8; print "$@"; }
+statuslog() { log "$@"; }
 errorprint() {
   timestamp
   if [ -t 1 ]; then
     tput bold
     tput setaf 1
   fi
-  echo "[$TS] ERROR: $@" >&2
+  echo "[$TS] ERROR: $*" >&2
   if [ -t 1 ]; then
     tput sgr0
   fi
   color=0
 }
-errorlog() { log "ERROR: $@"; }
-status() { statusprint $@; statuslog $@; }
-error() { errorprint $@; errorlog $@; }
+errorlog() { log "ERROR: $*"; }
+status() { statusprint "$@"; statuslog "$@"; }
+error() { errorprint "$@"; errorlog "$@"; }
 debug() {
   if [ "$debug" = "1" ]; then
     color=3
-    print $@
-    log $@
+    print "$@"
+    log "$@"
   fi
 }
 
@@ -96,20 +96,20 @@ loadconfig() {
 
 main() {
 
-  init $@
-  
+  init "$@"
+
   cmdcheck
   inetstatus
   domainwatch
-  
+
   if [ "$sendreport" = "1" ]; then
     sendreport
   fi
 
   scriptend=$(date +%s)
-  scripttime=$(echo $scriptend - $scriptstart | bc)
+  scripttime=$(echo "$scriptend" - "$scriptstart" | bc)
   status "Script finished in $(date -u -d @${scripttime} +"%T")"
-  
+
   exit_safe 0
 
 }
@@ -129,14 +129,14 @@ init() {
   fi
   which lockfile >/dev/null 2>&1
   if [ $? -eq 0 ] ; then
-    lockfile -r 0 -l $lockfilettl $lockfile || { exit_safe 1; }
+    lockfile -r 0 -l "$lockfilettl" "$lockfile" || { exit_safe 1; }
   else
-    touch $lockfile || { exit_safe 1; }
+    touch "$lockfile" || { exit_safe 1; }
   fi
   havelockfile=1
 
-  touch $tmpfile || exit_safe 1
-  touch $logfile || exit_safe 1
+  touch "$tmpfile" || exit_safe 1
+  touch "$logfile" || exit_safe 1
 
 }
 
@@ -145,7 +145,7 @@ exit_safe() {
   debug "exit_safe()"
   
   if [ "$havelockfile" -eq 1 ]; then
-    rm -f $lockfile
+    rm -f "$lockfile"
   fi
 
   exit $?
@@ -160,7 +160,7 @@ cmdcheck() {
   cmds="which cat cut tr sed grep bc cp mv rm mkdir date hostname mail ssh tput ping whois mutt"
   for cmd in $cmds
   do
-    which $cmd >/dev/null 2>&1
+    which "$cmd" >/dev/null 2>&1
     if [ $? != 0 ] ; then
       echo "ERROR: Missing \"${cmd}\" command!"
       exit_safe 1
@@ -175,13 +175,13 @@ inetstatus() {
 
   debug "inetstatus()"
 
-  inetwasdown=
+  #inetwasdown=
   inetwasdowntext=
   
   inetup=0
   for inettesthost in $inettesthosts
   do
-    pingtext=$(ping -c 1 -W ${pingtimeout} ${inettesthost})
+    pingtext=$(ping -c 1 -W "${pingtimeout}" "${inettesthost}")
     r=$?
     if [ $r = 0 ] ; then
       inetup=1
@@ -193,20 +193,20 @@ inetstatus() {
     status "Internet connection found to be up."
     entry=$(grep -i "INETDOWN Time=.*" ${tmpfile})
     if ! [ "$entry" = "" ]; then
-      inetwasdown=1
+      #inetwasdown=1
       #rm -f ${tmpfile} || exit_safe 1
       #touch ${tmpfile} || exit_safe 1
       sed -i "/^INETDOWN .*$/d" ${tmpfile}
       timenow=$(date +%s)
-      entrytime=$(echo $entry | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
+      entrytime=$(echo "$entry" | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
       if isnum "$entrytime" ; then
-        time=$(echo $timenow - $entrytime | bc)
+        time=$(echo "$timenow" - "$entrytime" | bc)
         timetext=$(date -u -d @${time} +"%T")
         inetwasdowntext="Internet was down $timetext"
-        status $inetwasdowntext
+        status "$inetwasdowntext"
       else
         inetwasdowntext="Internet was down - Failed to calculate downtime."
-        status $inetwasdowntext
+        status "$inetwasdowntext"
         entrytime=0
       fi
     fi
@@ -239,7 +239,7 @@ domainwatch() {
     status=
     available=0
     result_html=
-    output=$(whois $domain 2>&1)
+    output=$(whois "$domain" 2>&1)
     if [ $? -eq 0 ]; then
       IFS_DEFAULT=$IFS
       IFS=$'\n'
@@ -285,31 +285,31 @@ readfile() {
 
   debug "readfile()"
 
-  entryfail=0
-  failtime=0
+  #entryfail=0
+  #failtime=0
   reporttime=0
   entrytime=0
   entrystatus=
-  entryresult=
+  #entryresult=
 
   entry=$(grep -i "^${domain} .*" ${tmpfile})
   if [ "$entry" = "" ]; then
     return
   fi
-  entrystatus=$(echo $entry | cut -d' ' -f2)
+  entrystatus=$(echo "$entry" | cut -d' ' -f2)
   if [ "$entrystatus" = "" ]; then
     entry=
     return
   fi
 
-  reporttime=$(echo $entry | cut -d' ' -f3)
+  reporttime=$(echo "$entry" | cut -d' ' -f3)
   if [ "$reporttime" = "" ] || ! isnum "$reporttime"; then
     entry=
     entrystatus=
     reporttime=0
     return
   fi
-  entrytime=$(echo $entry | cut -d' ' -f4)
+  entrytime=$(echo "$entry" | cut -d' ' -f4)
   if [ "$entrytime" = "" ] || ! isnum "$entrytime"; then
     entry=
     entrystatus=
@@ -319,7 +319,7 @@ readfile() {
   fi
 
   timenow=$(date +%s)
-  time=$(echo $timenow - $entrytime | bc)
+  time=$(echo "$timenow" - "$entrytime" | bc)
 debug "Entry with timestamp \"${entrytime}\" ($(date -u -d @${time} +"%T") ago) found for domain \"$domain\". Status: $entrystatus ReportTime: $reporttime"
   
   debug "readfile() finished"
@@ -330,7 +330,7 @@ writefile() {
 
   debug "writefile()"
   
-  echo $entry | grep -i "^${domain} ${status} .*" >/dev/null 2>&1
+  echo "$entry" | grep -i "^${domain} ${status} .*" >/dev/null 2>&1
   if [ $? -eq 0 ]; then
     changed=0
   else
@@ -339,7 +339,7 @@ writefile() {
   debug "domain: ${domain} - Changed=$changed"
 
   timenow=$(date +%s)
-  reporttime_bc=$(echo $timenow - $reporttime | bc)
+  reporttime_bc=$(echo "$timenow" - "$reporttime" | bc)
 
   if [ "$entry" = "" ]; then
     entrytime=$(date +%s)
@@ -394,7 +394,7 @@ sendreport() {
   status "Sending monitor domain watch report..."
 
   scriptend=$(date +%s)
-  scripttime=$(echo $scriptend - $scriptstart | bc)
+  scripttime=$(echo "$scriptend" - "$scriptstart" | bc)
   reporttime=$(date +%s)
 
   report_add "<html>"
@@ -421,5 +421,5 @@ EOT
 
 }
 
-main
+main "$@"
 exit_safe 0

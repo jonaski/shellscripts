@@ -25,11 +25,8 @@
 # files after photo creation date in the format:
 # img-yyyymmdd-hhmmss-nnn-widthxheight.ext
 #
-# Last modified: 24/07-2016
-#
 
 version="0.2.5"
-revision="20160724"
 
 # Basic settings
 
@@ -42,7 +39,7 @@ devices="/dev/sdd1 /dev/sde1 /dev/sdf1 /dev/sdg1 /dev/sdh1 /dev/sdi1"
 folders="DCIM"
 photodir="$HOME/Photos/New"
 tempdir="/tmp"
-tempdiresc=`echo $tempdir | sed 's/ /\\\ /g'`
+tempdiresc=$(echo "$tempdir" | sed 's/ /\\\ /g')
 
 
 ##################### DONT CHANGE ANYTHING BELOW HERE #####################
@@ -52,7 +49,7 @@ tempdiresc=`echo $tempdir | sed 's/ /\\\ /g'`
 
 c=''
 n=''
-if [ "`eval echo -n 'a'`" = "-n a" ] ; then
+if [ "$(eval echo -n 'a')" = "-n a" ] ; then
   c='\c'
 else
   n='-n'
@@ -103,7 +100,7 @@ logfile () {
   fi
 
   if [ "$logging" = "1" ] && ! [ "$destdir" = "" ] ; then
-    echo "`date` *** $1" >>"$destdir/$logfile" || fail
+    echo "$(date) *** $1" >>"$destdir/$logfile" || fail
   fi
 
 }
@@ -118,7 +115,6 @@ fail () {
 
 # Mount device
 
-mounted=0
 devices_total=0
 devices_valid=0
 devices_mount=0
@@ -132,38 +128,37 @@ if [ "$sourcedir" = "" ]; then
   for device in $devices
   do
     #echo "Device: $device"
-    devices_total=`echo $devices_total + 1 | bc`
-    ls $device >/dev/null 2>&1
+    devices_total=$(echo $devices_total + 1 | bc)
+    ls "$device" >/dev/null 2>&1
     if ! [ $? -eq 0 ]; then
       continue
     fi
     echo "Found device \"$device\"."
-    devices_valid=`echo $devices_valid + 1 | bc`
+    devices_valid=$(echo $devices_valid + 1 | bc)
     mountpoint=
-    mounted=
     automounted=
-    mount=`mount | grep "^${device}"`
+    mount=$(mount | grep "^${device}")
     if [ "$mount" = "" ]; then
       echo $n "Mounting \"$device\". $c"
-      udisksctl mount -b $device || continue
+      udisksctl mount -b "$device" || continue
       # udisks may return 0 even when it's not mounted.
-      mount=`mount | grep ^${device}.*`
+      mount=$(mount | grep "^${device}.*")
       if [ "$mount" = "" ]; then
         echo "Failed."
         continue
       fi
-      mountpoint=`echo $mount | awk '{print $3}'`
+      mountpoint=$(echo "$mount" | awk '{print $3}')
       automounted=1
       if [ "$mountpoint" = "" ]; then
         echo "Failed to find mountpoint."
         logfile "ERROR: Unable to find mountpoint for \"$device\"." 1
-        udisksctl unmount -b $device
+        udisksctl unmount -b "$device"
         continue
       fi
       #echo "$mountpoint."
     else
       echo $n "Probing \"$device\". $c"
-      mountpoint=`echo $mount | awk '{print $3}'`
+      mountpoint=$(echo "$mount" | awk '{print $3}')
       if [ "$mountpoint" = "" ]; then
         echo "Failed to find mountpoint."
         logfile "ERROR: Unable to find mountpoint for \"$device\"." 1
@@ -171,16 +166,15 @@ if [ "$sourcedir" = "" ]; then
       fi
       echo "$mountpoint."
     fi
-    devices_mount=`echo $devices_mount + 1 | bc`
+    devices_mount=$(echo "$devices_mount" + 1 | bc)
     logfile "Device \"$device\" mounted on \"$mountpoint\"." 1
-    mounted=1
     found=0
     for folder in $folders
     do
-      for i in $mountpoint/*
+      for i in "$mountpoint"/*
       do
-        i=`echo $i | awk -F/ '{print $NF}'`
-        if [ $i = $folder ]; then
+        i=$(echo "$i" | awk -F/ '{print $NF}')
+        if [ "$i" = "$folder" ]; then
           found=1
           break
         fi
@@ -189,18 +183,17 @@ if [ "$sourcedir" = "" ]; then
     if [ $found = "0" ]; then
       logfile "Device \"$device\" missing folders $folders, skipping." 1
       if [ "$automounted" = "1" ]; then
-        udisksctl unmount -b $device
+        udisksctl unmount -b "$device"
       fi
       mountpoint=
-      mounted=
       automounted=
       continue
     fi
-    devices_photo=`echo $devices_photo + 1 | bc`
+    devices_photo=$(echo "$devices_photo" + 1 | bc)
     tput bold
     echo $n "Contents: $c"
     tput setaf 2
-    ls $mountpoint
+    ls "$mountpoint"
     tput sgr0
     while true; do
       read -e -n 1 -p "Use $device (Y/N) " answer
@@ -212,12 +205,10 @@ if [ "$sourcedir" = "" ]; then
     done
     if [ "$answer" = "0" ]; then
       if [ "$automounted" = "1" ]; then
-        udisksctl unmount -b $device
+        udisksctl unmount -b "$device"
       fi
       mountpoint=
-      mounted=
       automounted=
-      userskipped=1
       continue
     fi
     break
@@ -226,16 +217,16 @@ if [ "$sourcedir" = "" ]; then
 fi
 
 if [ "$sourcedir" = "" ]; then
-  if [ $devices_total -eq 0 ]; then
+  if [ "$devices_total" -eq 0 ]; then
     logfile "No devices found." 2
   else
-    if [ $devices_valid -eq 0 ]; then
+    if [ "$devices_valid" -eq 0 ]; then
       logfile "No valid devices found." 2
     else
-      if [ $devices_mount -eq 0 ]; then
+      if [ "$devices_mount" -eq 0 ]; then
         logfile "Unable to mount any devices." 2
       else
-        if [ $devices_photo -eq 0 ]; then
+        if [ "$devices_photo" -eq 0 ]; then
           logfile "Unable to find photos on any devices." 2
         else
           logfile "No more devices with photos." 2
@@ -267,7 +258,7 @@ fi
 
 # Create photo directory
 
-mkdir -p $destdir || fail
+mkdir -p "$destdir" || fail
 
 if [ ! -d "$destdir" ] ; then
   echo "ERROR: \"$destdir\" is not a directory!"
@@ -279,10 +270,10 @@ fi
 
 #Replace space with colon to avoid splitting up one image name.
 #for imagename in $cdir/*
-# | sed 's/ /\:/g'`
+# | sed 's/ /\:/g')
 IFS_DEFAULT=$IFS
 IFS=$'\n'
-for fullfile in `find $sourcedir`
+for fullfile in $(find "$sourcedir")
 do
 
   IFS=$IFS_DEFAULT
@@ -291,18 +282,18 @@ do
     continue
   fi
 
-  #fullfile=`echo $fullfile | sed 's/:/\ /g'`
-  cdir=`dirname "$fullfile"`
-  imagename=`echo $fullfile | awk -F/ '{print $NF}'`
+  #fullfile=$(echo $fullfile | sed 's/:/\ /g')
+  cdir=$(dirname "$fullfile")
+  imagename=$(echo "$fullfile" | awk -F/ '{print $NF}')
 
-  cdiresc=`echo $cdir | sed 's/ /\\\ /g'`
-  imagenameesc=`echo $imagename | sed 's/ /\\\ /g'`
-  imagenamefake=`echo $imagename | sed 's/ /\:/g'`
+  #cdiresc=$(echo "$cdir" | sed 's/ /\\\ /g')
+  imagenameesc=$(echo "$imagename" | sed 's/ /\\\ /g')
+  imagenamefake=$(echo "$imagename" | sed 's/ /\:/g')
 
   # Check if the file is a known image file.
 
   image=0
-  imagenamelow=`echo $imagename | tr 'A-Z' 'a-z'`
+  imagenamelow=$(echo "$imagename" | tr '[:upper:]' '[:lower:]')
   case "$imagenamelow" in
     *.jpg ) image=1;;
     *.jpeg ) image=1;;
@@ -329,14 +320,14 @@ do
 
   # Determine orientation
 
-  #exif=`exiftool -Orientation -n "$tempdir/$imagename"` || fail
+  #exif=$(exiftool -Orientation -n "$tempdir/$imagename") || fail
   #if [ "$exif" = "" ] ; then
   #  logfile "ERROR: Cannot determine orientation for image: \"$tempdir/$imagename\"." 2
   #  read -e -n 1 -p "" answer
   #  exit 1
   #fi
-  #orientation=`echo $exif | awk '{print $3}'` || fail
-  orientation=`identify -format '%[exif:orientation]' "$tempdir/$imagename"`
+  #orientation=$(echo "$exif" | awk '{print $3}') || fail
+  orientation=$(identify -format '%[exif:orientation]' "$tempdir/$imagename")
   if [ "$orientation" = "" ] ; then
     logfile "ERROR: Cannot determine orientation for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
@@ -350,7 +341,7 @@ do
       echo $n "Rotating \"$tempdir/$imagename\". $c"
       convert -auto-orient "$tempdir/$imagename" "$tempdir/$imagename"
       echo "Done."
-      orientation=`identify -format '%[exif:orientation]' "$tempdir/$imagename"`
+      orientation=$(identify -format '%[exif:orientation]' "$tempdir/$imagename")
       if [ "$orientation" = "" ] ; then
         logfile "ERROR: Cannot determine orientation for image: \"$tempdir/$imagename\"." 2
         read -e -n 1 -p "" answer
@@ -382,7 +373,7 @@ do
 
   #echo $n "Dermining date for image \"$tempdir/$imagename\". $c"
 
-  exif=`exiv2 "$tempdir/$imagename" | grep -a "^Image timestamp :"`
+  exif=$(exiv2 "$tempdir/$imagename" | grep -a "^Image timestamp :")
   if [ "$exif" = "" ] ; then
     logfile "ERROR: Cannot determine date for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
@@ -390,7 +381,7 @@ do
   fi
   #echo "exif: $exif"
 
-  date=`echo $exif | awk '{print $4}'` || fail
+  date=$(echo "$exif" | awk '{print $4}') || fail
   if [ "$date" = "" ] ; then
     logfile "ERROR: Cannot determine date for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
@@ -398,49 +389,49 @@ do
   fi
   #echo "Date: $date"
 
-  time=`echo $exif | awk '{print $5}'` || fail
+  time=$(echo "$exif" | awk '{print $5}') || fail
   if [ "$date" = "" ] ; then
     logfile "ERROR: Cannot determine time for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
 
-  date=`echo $date |  sed 's/://g'` || fail
+  date=$(echo "$date" | sed 's/://g') || fail
   if [ "$date" = "" ] ; then
     logfile "ERROR: Cannot determine date for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
-  time=`echo $time |  sed 's/://g'` || fail
+  time=$(echo "$time" |  sed 's/://g') || fail
   if [ "$date" = "" ] ; then
     logfile "ERROR: Cannot determine date for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
-  
+
   dir=$date
 
   # Determine the image format and geometry for use in the filename.
 
   echo $n "Dermining format and geometry for image \"$tempdir/$imagename\". $c"
-  
-  identify=`identify $tempdiresc/$imagenameesc` || fail
-  #identifyfake=`echo $identify |  sed 's/\//:/g'`
-  #cdirfake=`echo $cdir |  sed 's/\//:/g'`
-  #identify=`echo $identifyfake | sed "s/${cdirfake}:${imagename} //g"`
+
+  identify=$(identify "$tempdiresc/$imagenameesc") || fail
+  #identifyfake=$(echo "$identify" |  sed 's/\//:/g')
+  #cdirfake=$(echo "$cdir" |  sed 's/\//:/g')
+  #identify=$(echo "$identifyfake" | sed "s/${cdirfake}:${imagename} //g")
 
   if [ "$identify" = "" ] ; then
     logfile "ERROR: Cannot determine format and geometry for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
-  format=`echo $identify | awk '{print $2}'` || fail
+  format=$(echo "$identify" | awk '{print $2}') || fail
   if [ "$format" = "" ] ; then
     logfile "ERROR: Cannot determine format for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
-  extension=`echo $format | tr 'A-Z' 'a-z'` || fail
+  extension=$(echo "$format" | tr '[:upper:]' '[:lower:]') || fail
   if [ "$extension" = "" ] ; then
     logfile "ERROR: Cannot determine extension for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
@@ -449,7 +440,7 @@ do
   case "$extension" in
     jpeg ) extension=jpg;;
   esac
-  geometry=`echo $identify | awk '{print $3}'` || fail
+  geometry=$(echo "$identify" | awk '{print $3}') || fail
   if [ "$geometry" = "" ] ; then
     logfile "ERROR: Cannot determine geometry for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
@@ -458,13 +449,13 @@ do
 
   # Geometry can be 563x144+0+0 or 75x98
   # we need to get rid of the plus (+) and the x characters:
-  width=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $1}'` || fail
+  width=$(echo "$geometry" | sed 's/[^0-9]/ /g' | awk '{print $1}') || fail
   if [ "$width" = "" ] ; then
     logfile "ERROR: Cannot determine width for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
     exit 1
   fi
-  height=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $2}'` || fail
+  height=$(echo "$geometry" | sed 's/[^0-9]/ /g' | awk '{print $2}') || fail
   if [ "$height" = "" ] ; then
     logfile "ERROR: Cannot determine height for image: \"$tempdir/$imagename\"." 2
     read -e -n 1 -p "" answer
@@ -479,12 +470,12 @@ do
   skip=0
   for (( count = 1 ;; count++ ))
   do
-    if [ $count -gt 999 ] ; then
+    if [ "$count" -gt 999 ] ; then
       logfile "ERROR: Directory \"$dir\" has more then 999 images. Skipping image \"$tempdir/$imagename\"."; 2
       skip=1
       break
     fi
-    imagenumber=`echo $count | awk '{printf("%.3d", $1)}'` || fail
+    imagenumber=$(echo "$count" | awk '{printf("%.3d", $1)}') || fail
     if [ "$imagenumber" = "" ] ; then
       logfile "ERROR: Cannot format number for image: \"$tempdir/$imagename\"."; 2
       read -e -n 1 -p "" answer
@@ -493,14 +484,14 @@ do
     newname="img-${date}-${time}-${imagenumber}-${newwidth}x${newheight}.${extension}"
     if [ -f "$destdir/$dir/$newname" ] ; then
       # Make sure we dont overwrite another image.
-      md5sum1=`md5sum "$destdir/$dir/$newname" | awk '{print $1}'`
+      md5sum1=$(md5sum "$destdir/$dir/$newname" | awk '{print $1}')
       if [ "$md5sum1" = "" ]; then
         logfile "ERROR: Cannot determine md5sum for image: \"$destdir/$dir/$newname\"." 2
         rm -f "$tempdir/$imagename"
         read -e -n 1 -p "" answer
         exit 1
       fi
-      md5sum2=`md5sum "$tempdir/$imagename" | awk '{print $1}'`
+      md5sum2=$(md5sum "$tempdir/$imagename" | awk '{print $1}')
       if [ "$md5sum2" = "" ]; then
         logfile "ERROR: Cannot determine md5sum for image: \"$tempdir/$imagename\"." 2
         rm -f "$tempdir/$imagename"
@@ -531,7 +522,7 @@ do
 
   if [ ! -d "$destdir/$dir" ] ; then
     echo $n "Creating directory \"$destdir/$dir\". $c"
-    mkdir $destdir/$dir || {
+    mkdir "$destdir/$dir" || {
       rm -f "$tempdir/$imagename";
       read -e -n 1 -p "" answer;
       exit 1;
@@ -557,7 +548,7 @@ do
 done
 
 if [ "$automounted" = "1" ]; then
-  udisksctl unmount -b $device
+  udisksctl unmount -b "$device"
 fi
 
 echo "Done."

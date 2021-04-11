@@ -28,12 +28,12 @@ backup_local() {
   mountpointdir=$backuplocation
   mounted=
 
-  topdir=$(echo $backupdir | cut -d'/' -f2)
+  topdir=$(echo "$backupdir" | cut -d'/' -f2)
   if [ "$topdir" = "mnt" ] || [ "$topdir" = "media" ] ; then
-    mountpoint=$(echo $backupdir | cut -d'/' -f-3)
-    mountpoint -q $mountpoint
+    mountpoint=$(echo "$backupdir" | cut -d'/' -f-3)
+    mountpoint -q "$mountpoint"
     if [ $? != 0 ] ; then
-      mount $mountpoint || {
+      mount "$mountpoint" || {
         if [ "$count" = "1" ]; then
           exit_failure
         fi
@@ -53,7 +53,7 @@ backup_local() {
   else
     backup_copy || {
       if [ "$mounted" = "1" ] ; then
-        umount $mountpoint
+        umount "$mountpoint"
       fi
       return 1
     }
@@ -62,7 +62,7 @@ backup_local() {
   backup_delete
 
   if ! [ "$count" = "1" ] && [ "$mounted" = "1" ] ; then
-    umount $mountpoint
+    umount "$mountpoint"
   fi
 
   return 0
@@ -71,8 +71,8 @@ backup_local() {
 
 backup_ssh() {
 
-  backuphost=$(echo $backuplocation | cut -d':' -f1)
-  backupdir=$(echo $backuplocation | cut -d':' -f2-)
+  backuphost=$(echo "$backuplocation" | cut -d':' -f1)
+  backupdir=$(echo "$backuplocation" | cut -d':' -f2-)
 
   if [ "$backuphost" = "$backupid" ] ; then
     backuplocation=$backupdir
@@ -84,20 +84,20 @@ backup_ssh() {
   mountpointdir=$mountpoint
 
   if [ "$count" = "1" ]; then
-    backup_ssh_mount || { rmdir $mountpoint >/dev/null 2>&1; exit_failure; }
+    backup_ssh_mount || { rmdir "$mountpoint" >/dev/null 2>&1; exit_failure; }
     mounted1=1
     mountpoint1=$mountpoint
     backup_create
   else
     #ssh $backupsshargs $backuphost mkdir -p $backupdir || return 1
     backup_ssh_copy || return 1
-    backup_ssh_mount || { rmdir $mountpoint >/dev/null 2>&1; return 1; }
+    backup_ssh_mount || { rmdir "$mountpoint" >/dev/null 2>&1; return 1; }
   fi
 
   backup_delete
 
   if ! [ "$count" = "1" ]; then
-    fusermount -u $mountpoint && rmdir $mountpoint
+    fusermount -u "$mountpoint" && rmdir "$mountpoint"
   fi
 
   return 0
@@ -106,21 +106,21 @@ backup_ssh() {
 
 backup_ssh_copy() {
 
-  echo $n "Copying tar backup \"$backuplocationsrc/$backupfile.bz2\" to location \"$backuplocation\". $c"
-  scp -qp $backupfileorig $backuplocation/ || return 1
+  echo "$n" "Copying tar backup \"$backuplocationsrc/$backupfile.bz2\" to location \"$backuplocation\". $c"
+  scp -qp "$backupfileorig" "$backuplocation"/ || return 1
   echo "Done."
-  scp -qp $backupfileorigmd5 $backuplocation/ || return 1
+  scp -qp "$backupfileorigmd5" "$backuplocation"/ || return 1
   if [ "$backupmysql" = "1" ] ; then
-    echo $n "Copying mysql backup \"$backuplocationsrc/$backupmysqlfile.bz2\" to location \"$backuplocation\". $c"
-    scp -qp $backupmysqlfileorig $backuplocation || return 1
+    echo "$n" "Copying mysql backup \"$backuplocationsrc/$backupmysqlfile.bz2\" to location \"$backuplocation\". $c"
+    scp -qp "$backupmysqlfileorig" "$backuplocation" || return 1
     echo "Done."
-    scp -qp $backupmysqlfileorigmd5 $backuplocation || return 1
+    scp -qp "$backupmysqlfileorigmd5" "$backuplocation" || return 1
   fi
   if [ "$backuppgsql" = "1" ] ; then
-    echo $n "Copying pgsql backup \"$backuplocationsrc/$backuppgsqlfile.bz2\" to location \"$backuplocation\". $c"
-    scp -qp $backuppgsqlfileorig $backuplocation || return 1
+    echo "$n" "Copying pgsql backup \"$backuplocationsrc/$backuppgsqlfile.bz2\" to location \"$backuplocation\". $c"
+    scp -qp "$backuppgsqlfileorig" "$backuplocation" || return 1
     echo "Done."
-    scp -qp $backuppgsqlfileorigmd5 $backuplocation || return 1
+    scp -qp "$backuppgsqlfileorigmd5" "$backuplocation" || return 1
   fi
 
   return 0
@@ -129,9 +129,9 @@ backup_ssh_copy() {
 
 backup_ssh_mount() {
 
-   mkdir -p $mountpoint || return 1
+   mkdir -p "$mountpoint" || return 1
    #ssh $backupsshargs $backuphost mkdir -p $backupdir || return 1
-   sshfs $backupsshfsargs $backuplocation $mountpoint || return 1
+   sshfs "$backupsshfsargs" "$backuplocation" "$mountpoint" || return 1
 
    return 0
 
@@ -139,19 +139,19 @@ backup_ssh_mount() {
 
 backup_smb() {
 
-  backupproto="$(echo $backuplocation | grep '://' | sed -e 's,^\(.*://\).*,\1,g')"
-  backupurl=$(echo $backuplocation | sed -e s,${backupproto},,g)
-  backupuser="$(echo $backupurl | grep '@' | cut -d'@' -f1 | cut -d':' -f1)"
-  backuppass="$(echo $backupurl | grep '@' | cut -d'@' -f1 | cut -d':' -f2)"
-  backuphost="$(echo $backupurl | sed -e s,${backupuser}.*@,,g | cut -d/ -f1)"
-  backupshare="$(echo $backupurl | cut -d'/' -f2)"
-  backupdir="$(echo $backupurl | grep '/' | cut -d'/' -f3-)"
+  backupproto="$(echo "$backuplocation" | grep '://' | sed -e 's,^\(.*://\).*,\1,g')"
+  backupurl=$(echo "$backuplocation" | sed -e s,${backupproto},,g)
+  backupuser="$(echo "$backupurl" | grep '@' | cut -d'@' -f1 | cut -d':' -f1)"
+  backuppass="$(echo "$backupurl" | grep '@' | cut -d'@' -f1 | cut -d':' -f2)"
+  backuphost="$(echo "$backupurl" | sed -e s,${backupuser}.*@,,g | cut -d/ -f1)"
+  backupshare="$(echo "$backupurl" | cut -d'/' -f2)"
+  backupdir="$(echo "$backupurl" | grep '/' | cut -d'/' -f3-)"
   backupdir="/$backupdir"
 
   mountpoint="/tmp/smb-$backupid-$backuphost-$backupdate-$RANDOM"
   mountpointdir="$mountpoint$backupdir"
 
-  mkdir -p $mountpoint || return 1
+  mkdir -p "$mountpoint" || return 1
 
   if ! [ "$backupuser" = "" ] && ! [ "$backuppass"  = "" ] ; then
     backupoptions="-o username=$backupuser,password=$backuppass"
@@ -161,20 +161,20 @@ backup_smb() {
     backupoptions=
   fi
 
-  mount -t cifs "//$backuphost/$backupshare" $backupoptions $mountpoint || { rmdir $mountpoint; return 1; }
+  mount -t cifs "//$backuphost/$backupshare" "$backupoptions" "$mountpoint" || { rmdir "$mountpoint"; return 1; }
 
   if [ "$count" = "1" ]; then
     mounted1=1
     mountpoint1=$mountpoint
     backup_create
   else
-    backup_copy || { umount $mountpoint && rmdir $mountpoint; return 1; }
+    backup_copy || { umount "$mountpoint" && rmdir "$mountpoint"; return 1; }
   fi
 
   backup_delete
 
   if ! [ "$count" = "1" ]; then
-    umount $mountpoint && rmdir $mountpoint
+    umount "$mountpoint" && rmdir "$mountpoint"
   fi
 
   return 0
@@ -188,7 +188,7 @@ backup_ftp() {
     exit_failure
   fi
 
-  backuplocation2=$(echo $backuplocation | sed -e 's/ftp:\/\///g')
+  backuplocation2=$(echo "$backuplocation" | sed -e 's/ftp:\/\///g')
   if [ "$backuplocation2" = "" ]; then
     echo "ERROR: Cant figure out URL for \"$backuplocation\"." >&2
     return 1
@@ -196,22 +196,22 @@ backup_ftp() {
 
   mountpoint="/tmp/ftp-$backupid-$backuphost-$backupdate-$RANDOM"
   mountpointdir=$mountpoint
-  mkdir -p $mountpoint || return 1
+  mkdir -p "$mountpoint" || return 1
 
-  curlftpfs $backuplocation2 $mountpoint || { rmdir $mountpoint; return 1; }
+  curlftpfs "$backuplocation2" "$mountpoint" || { rmdir "$mountpoint"; return 1; }
 
   if [ "$count" = "1" ]; then
     mounted1=1
     mountpoint1=$mountpoint
     backup_create
   else
-    backup_copy || { umount $mountpoint && rmdir $mountpoint; return 1; }
+    backup_copy || { umount "$mountpoint" && rmdir "$mountpoint"; return 1; }
   fi
 
   backup_delete
 
   if ! [ "$count" = "1" ]; then
-    umount $mountpoint && rmdir $mountpoint
+    umount "$mountpoint" && rmdir "$mountpoint"
   fi
 
   return 0
@@ -233,18 +233,18 @@ backup_create() {
 
   echo "tar -cvf $backupfileorig -C / --ignore-failed-read -X $backupexcludestmpfile $backupfiles"
 
-  echo $n "Creating tar archive as \"$backuplocationsrc/$backupfile\". $c"
-  echo "$backupexclude" >$backupexcludestmpfile || exit_failure
-  echo "$backupmountpoint" >>$backupexcludestmpfile || exit_failure
-  tar -cvf $backupfileorig -C / --ignore-failed-read -X $backupexcludestmpfile $backupfiles >$backupfilestmpfile || { rm -f $backupfileorig; exit_failure; return 1; }
+  echo "$n" "Creating tar archive as \"$backuplocationsrc/$backupfile\". $c"
+  echo "$backupexclude" >"$backupexcludestmpfile" || exit_failure
+  echo "$backupmountpoint" >>"$backupexcludestmpfile" || exit_failure
+  tar -cvf "$backupfileorig" -C / --ignore-failed-read -X "$backupexcludestmpfile" "$backupfiles" >"$backupfilestmpfile" || { rm -f "$backupfileorig"; exit_failure; return 1; }
   echo "Done."
-  echo $n "Compressing tar archive as \"$backuplocationsrc/$backupfile.bz2\". $c"
-  bzip2 $backupfileorig || { rm -f $backupfileorig; rm -f $backupfileorig.bz2; exit_failure; return 1; }
+  echo "$n" "Compressing tar archive as \"$backuplocationsrc/$backupfile.bz2\". $c"
+  bzip2 "$backupfileorig" || { rm -f "$backupfileorig"; rm -f "${backupfileorig}.bz2"; exit_failure; return 1; }
   echo "Done."
   backupfileorig="$backupfileorig.bz2"
   backupfileorigmd5="$backupfileorig.md5"
-  echo $n "Creating MD5 checksum file \"$backuplocationsrc/$backupfile.bz2.md5\". $c"
-  md5sum $backupfileorig >$backupfileorigmd5 && echo "Done."
+  echo "$n" "Creating MD5 checksum file \"$backuplocationsrc/$backupfile.bz2.md5\". $c"
+  md5sum "$backupfileorig" >"$backupfileorigmd5" && echo "Done."
 
   # MYSQL
 
@@ -260,22 +260,22 @@ backup_create() {
       fi
     done
 
-    echo $n "Dumping mysql database to \"$backuplocationsrc/$backupmysqlfile\". $c"
-    $backupmysqlcmd > $backupmysqlfileorig
+    echo "$n" "Dumping mysql database to \"$backuplocationsrc/$backupmysqlfile\". $c"
+    "$backupmysqlcmd" > "$backupmysqlfileorig"
     if [ $? != 0 ] ; then
       backupmysql=0
     else
       echo "Done."
-      echo $n "Compressing mysql database as \"$backuplocationsrc/$backupmysqlfile.bz2\". $c"
-      bzip2 $backupmysqlfileorig
+      echo "$n" "Compressing mysql database as \"$backuplocationsrc/$backupmysqlfile.bz2\". $c"
+      bzip2 "$backupmysqlfileorig"
       if [ $? != 0 ] ; then
         backupmysql=0
       else
         echo "Done."
         backupmysqlfileorig="$backupmysqlfileorig.bz2"
         backupmysqlfileorigmd5="$backupmysqlfileorig.md5"
-        echo $n "Creating mysql database MD5 checksum file \"$backuplocationsrc/$backupmysqlfile.bz2.md5\". $c"
-        md5sum $backupmysqlfileorig >$backupmysqlfileorigmd5 && echo "Done."
+        echo "$n" "Creating mysql database MD5 checksum file \"$backuplocationsrc/$backupmysqlfile.bz2.md5\". $c"
+        md5sum "$backupmysqlfileorig" >"$backupmysqlfileorigmd5" && echo "Done."
       fi
     fi
   fi
@@ -294,22 +294,22 @@ backup_create() {
       fi
     done
 
-    echo $n "Dumping pgsql database to \"$backuplocationsrc/$backuppgsqlfile\". $c"
-    $backuppgsqlcmd > $backuppgsqlfileorig
+    echo "$n" "Dumping pgsql database to \"$backuplocationsrc/$backuppgsqlfile\". $c"
+    $backuppgsqlcmd > "$backuppgsqlfileorig"
     if [ $? != 0 ] ; then
       backuppgsql=0
     else
       echo "Done."
-      echo $n "Compressing pgsql database as \"$backuplocationsrc/$backuppgsqlfile.bz2\". $c"
-      bzip2 $backuppgsqlfileorig
+      echo "$n" "Compressing pgsql database as \"$backuplocationsrc/$backuppgsqlfile.bz2\". $c"
+      bzip2 "$backuppgsqlfileorig"
       if [ $? != 0 ] ; then
         backuppgsql=0
       else
         echo "Done."
         backuppgsqlfileorig="$backuppgsqlfileorig.bz2"
         backuppgsqlfileorigmd5="$backuppgsqlfileorig.md5"
-        echo $n "Creating pgsql database MD5 checksum file \"$backuplocationsrc/$backuppgsqlfile.bz2.md5\". $c"
-        md5sum $backuppgsqlfileorig >$backuppgsqlfileorigmd5 && echo "Done."
+        echo "$n" "Creating pgsql database MD5 checksum file \"$backuplocationsrc/$backuppgsqlfile.bz2.md5\". $c"
+        md5sum "$backuppgsqlfileorig" >"$backuppgsqlfileorigmd5" && echo "Done."
       fi
     fi
   fi
@@ -320,21 +320,21 @@ backup_create() {
 
 backup_copy() {
 
-  echo $n "Copying tar backup \"$backuplocationsrc/$backupfile.bz2\" to location \"$backuplocation\". $c"
-  cp --preserve=timestamps $backupfileorig $mountpointdir || return 1
+  echo "$n" "Copying tar backup \"$backuplocationsrc/$backupfile.bz2\" to location \"$backuplocation\". $c"
+  cp --preserve=timestamps "$backupfileorig" "$mountpointdir" || return 1
   echo "Done."
-  cp --preserve=timestamps $backupfileorigmd5 $mountpointdir || return 1
+  cp --preserve=timestamps "$backupfileorigmd5" "$mountpointdir" || return 1
   if [ "$backupmysql" = "1" ] ; then
-    echo $n "Copying mysql backup \"$backuplocationsrc/$backupmysqlfile.bz2\" to location \"$backuplocation\". $c"
-    cp --preserve=timestamps $backupmysqlfileorig $mountpointdir || return 1
+    echo "$n" "Copying mysql backup \"$backuplocationsrc/$backupmysqlfile.bz2\" to location \"$backuplocation\". $c"
+    cp --preserve=timestamps "$backupmysqlfileorig" "$mountpointdir" || return 1
     echo "Done."
-    cp --preserve=timestamps $backupmysqlfileorigmd5 $mountpointdir || return 1
+    cp --preserve=timestamps "$backupmysqlfileorigmd5" "$mountpointdir" || return 1
   fi
   if [ "$backuppgsql" = "1" ] ; then
-    echo $n "Copying pgsql backup \"$backuplocationsrc/$backuppgsqlfile.bz2\" to location \"$backuplocation\". $c"
-    cp --preserve=timestamps $backuppgsqlfileorig $mountpointdir || return 1
+    echo "$n" "Copying pgsql backup \"$backuplocationsrc/$backuppgsqlfile.bz2\" to location \"$backuplocation\". $c"
+    cp --preserve=timestamps "$backuppgsqlfileorig" "$mountpointdir" || return 1
     echo "Done."
-    cp --preserve=timestamps $backuppgsqlfileorigmd5 $mountpointdir || return 1
+    cp --preserve=timestamps "$backuppgsqlfileorigmd5" "$mountpointdir" || return 1
   fi
 
   return 0
@@ -344,7 +344,7 @@ backup_copy() {
 backup_delete() {
 
   backups=0
-  for i in `ls -1 -r "$mountpointdir"`
+  for i in $(ls -1 -r "$mountpointdir")
   do
     if ! echo "$i" | grep "^$backupfileprefix-.*\.tar\.bz2$" >/dev/null 2>&1 ; then
       continue
@@ -352,9 +352,9 @@ backup_delete() {
     if [ "$i" = "$backupfile.bz2" ] ; then
       continue
     fi
-    backups=$(echo $backups + 1 | bc)
-    if [ $backups -gt $backupold2keep ] ; then
-      echo $n "Deleting old backup \"$backuplocation/$i\". $c"
+    backups=$(echo "$backups" + 1 | bc)
+    if [ "$backups" -gt "$backupold2keep" ] ; then
+      echo "$n" "Deleting old backup \"$backuplocation/$i\". $c"
       rm "$mountpointdir/$i" && echo "Done."
       rm -f "$mountpointdir/$i.md5"
     fi
@@ -364,7 +364,7 @@ backup_delete() {
 
   if [ "$backupmysql" = "1" ] ; then
     backups=0
-    for i in `ls -1 -r "$mountpointdir"`
+    for i in $(ls -1 -r "$mountpointdir")
     do
       if ! echo "$i" | grep "$backupmysqlfileprefix-.*\.sql\.bz2$" >/dev/null 2>&1 ; then
         continue
@@ -372,9 +372,9 @@ backup_delete() {
       if [ "$i" = "$backupmysqlfile.bz2" ] ; then
         continue
       fi
-      backups=$(echo $backups + 1 | bc)
-      if [ $backups -gt $backupold2keep ] ; then
-        echo $n "Deleting old mysql backup \"$backuplocation/$i\". $c"
+      backups=$(echo "$backups" + 1 | bc)
+      if [ "$backups" -gt "$backupold2keep" ] ; then
+        echo "$n" "Deleting old mysql backup \"$backuplocation/$i\". $c"
         rm "$mountpointdir/$i" && echo "Done."
         rm -f "$mountpointdir/$i.md5"
       fi
@@ -385,7 +385,7 @@ backup_delete() {
 
   if [ "$backuppgsql" = "1" ] ; then
     backups=0
-    for i in `ls -1 -r "$mountpointdir"`
+    for i in $(ls -1 -r "$mountpointdir")
     do
       if ! echo "$i" | grep "$backuppgsqlfileprefix-.*\.sql\.bz2$" >/dev/null 2>&1 ; then
         continue
@@ -393,9 +393,9 @@ backup_delete() {
       if [ "$i" = "$backuppgsqlfile.bz2" ] ; then
         continue
       fi
-      backups=$(echo $backups + 1 | bc)
-      if [ $backups -gt $backupold2keep ] ; then
-        echo $n "Deleting old pgsql backup \"$backuplocation/$i\". $c"
+      backups=$(echo "$backups" + 1 | bc)
+      if [ "$backups" -gt "$backupold2keep" ] ; then
+        echo "$n" "Deleting old pgsql backup \"$backuplocation/$i\". $c"
         rm "$mountpointdir/$i" && echo "Done."
         rm -f "$mountpointdir/$i.md5"
       fi
@@ -406,25 +406,25 @@ backup_delete() {
 
 exit_cleanup() {
 
-  rm -f $backupexcludestmpfile
-  rm -f $backupfilestmpfile
+  rm -f "$backupexcludestmpfile"
+  rm -f "$backupfilestmpfile"
 
   # Umount drives
 
   if [ "$mounted1" = "1" ] ; then
-    echo $mountpoint1 | grep '^\/tmp\/ssh-' >/dev/null 2>&1
+    echo "$mountpoint1" | grep '^\/tmp\/ssh-' >/dev/null 2>&1
     if [ $? -eq 0 ] ; then
-      fusermount -u $mountpoint1 && rmdir $mountpoint1
+      fusermount -u "$mountpoint1" && rmdir "$mountpoint1"
     else
-      echo $mountpoint1 | grep '^\/tmp\/smb-' >/dev/null 2>&1
+      echo "$mountpoint1" | grep '^\/tmp\/smb-' >/dev/null 2>&1
       if [ $? -eq 0 ] ; then
-        umount $mountpoint1 && rmdir $mountpoint1
+        umount "$mountpoint1" && rmdir "$mountpoint1"
       else
-        echo $mountpoint1 | grep '^\/tmp\/ftp-' >/dev/null 2>&1
+        echo "$mountpoint1" | grep '^\/tmp\/ftp-' >/dev/null 2>&1
         if [ $? -eq 0 ] ; then
-          umount $mountpoint1 && rmdir $mountpoint1
+          umount "$mountpoint1" && rmdir "$mountpoint1"
         else
-          umount $mountpoint1
+          umount "$mountpoint1"
         fi
       fi
     fi
@@ -435,8 +435,8 @@ exit_cleanup() {
 report_success() {
 
   LANG="en_GB"
-  mail -s "Tar backup for `hostname` on `date` to location $backuplocation was successful" -a "$backupfilestmpfile" "$backupemailsuccess" <<EOT
-Tar backup for `hostname` on `date` to location $backuplocation was successful
+  mail -s "Tar backup for $(hostname) on $(date) to location $backuplocation was successful" -a "$backupfilestmpfile" "$backupemailsuccess" <<EOT
+Tar backup for $(hostname) on $(date) to location $backuplocation was successful
 
 Backup file: $backupfile
 Configuration file: $backupconfig
@@ -465,8 +465,8 @@ EOT
 report_failure() {
 
  LANG="en_GB"
- mail -s "Tar backup for `hostname` on `date` to location $backuplocation FAILED" "$backupemailfailure" <<EOT
-Tar backup for `hostname` on `date` to location $backuplocation FAILED
+ mail -s "Tar backup for $(hostname) on $(date) to location $backuplocation FAILED" "$backupemailfailure" <<EOT
+Tar backup for $(hostname) on $(date) to location $backuplocation FAILED
 
 Backup file: $backupfile
 Configuration file: $backupconfig
@@ -493,8 +493,8 @@ EOT
 report_failure_all() {
 
  LANG="en_GB"
- mail -s "Tar backup for `hostname` on `date` FAILED" "$backupemailfailureall" <<EOT
-Tar backup for `hostname` on `date` FAILED
+ mail -s "Tar backup for $(hostname) on $(date) FAILED" "$backupemailfailureall" <<EOT
+Tar backup for $(hostname) on $(date) FAILED
 
 Backup file: $backupfile
 Configuration file: $backupconfig
@@ -545,7 +545,7 @@ exit_quiet() {
 
 c=''
 n=''
-if [ "`eval echo -n 'a'`" = "-n a" ] ; then
+if [ "$(eval echo -n 'a')" = "-n a" ] ; then
   c='\c'
 else
   n='-n'
@@ -565,7 +565,7 @@ esac
 done
 
 # Reset $@
-shift `echo $OPTIND-1 | bc`
+shift $(echo $OPTIND-1 | bc)
 
 # Locate configuration file
 
@@ -631,15 +631,15 @@ done
 cmds="which cp scp mv rm mkdir rmdir cat tr bc cut sed grep mail tar bzip2 md5sum date hostname mount umount mountpoint fusermount"
 for backuplocation in $backuplocations
 do
-  echo $backuplocation | grep -i '.*:\/\/.*\/' >/dev/null 2>&1
+  echo "$backuplocation" | grep -i '.*:\/\/.*\/' >/dev/null 2>&1
   if [ $? -eq 0 ] ; then
-    echo $backuplocation | grep -i '^ftp:\/\/.*\/' >/dev/null 2>&1
+    echo "$backuplocation" | grep -i '^ftp:\/\/.*\/' >/dev/null 2>&1
     if [ $? -eq 0 ] ; then
       cmds="$cmds curlftpfs"
       continue
     fi
   else
-    echo $backuplocation | grep '.*:\/' >/dev/null 2>&1
+    echo "$backuplocation" | grep '.*:\/' >/dev/null 2>&1
     if [ $? -eq 0 ] ; then
       cmds="$cmds sshfs"
       continue
@@ -649,7 +649,7 @@ done
 
 for cmd in $cmds
 do
-  which $cmd >/dev/null 2>&1
+  which "$cmd" >/dev/null 2>&1
   if [ $? != 0 ] ; then
     echo "ERROR: Missing \"${cmd}\" command!" >&2
     exit_failure
@@ -674,16 +674,16 @@ backupfilesX=$(echo "$backupfiles" | tr '\n' ' ' | sed -e 's/^ //g' | sed -e 's/
 backupfiles=
 for ((i=1; ; i++))
 do
-  s=$(echo "$backupfilesX" | cut -d' ' -f$i)
+  s=$(echo "$backupfilesX" | cut -d' ' -f"$i")
   if [ "$s" = "" ]; then
     break
   fi
   s2=$s
-  echo $s | grep -i '^\/.*' >/dev/null 2>&1
+  echo "$s" | grep -i '^\/.*' >/dev/null 2>&1
   if ! [ $? -eq 0 ] ; then
     s2="/$s"
   fi
-  ls $s2 >/dev/null 2>&1
+  ls "$s2" >/dev/null 2>&1
   if [ $? -eq 0 ] ; then
     backupfiles="$backupfiles $s"
   else
@@ -705,7 +705,7 @@ locationsfailure=0
 for backuplocation in $backuplocations
 do
 
-  count=$(echo $count + 1 | bc)
+  count=$(echo "$count" + 1 | bc)
   echo "Performing backup to \"$backuplocation\""
 
   backuphost=
@@ -715,25 +715,25 @@ do
   mountpointdir=
   ret=
 
-  echo $backuplocation | grep -i '.*:\/\/.*\/' >/dev/null 2>&1
+  echo "$backuplocation" | grep -i '.*:\/\/.*\/' >/dev/null 2>&1
   if [ $? -eq 0 ] ; then
-    echo $backuplocation | grep -i '^smb:\/\/.*\/' >/dev/null 2>&1
+    echo "$backuplocation" | grep -i '^smb:\/\/.*\/' >/dev/null 2>&1
     if [ $? -eq 0 ] ; then # SMB
       backup_smb
       ret=$?
     fi
-    echo $backuplocation | grep -i '^ftp:\/\/.*\/' >/dev/null 2>&1
+    echo "$backuplocation" | grep -i '^ftp:\/\/.*\/' >/dev/null 2>&1
     if [ $? -eq 0 ] ; then # FTP
       backup_ftp
       ret=$?
     fi
   else
-    echo $backuplocation | grep '^\/' >/dev/null 2>&1
+    echo "$backuplocation" | grep '^\/' >/dev/null 2>&1
     if [ $? -eq 0 ] ; then # Local
       backup_local
       ret=$?
     fi
-    echo $backuplocation | grep '.*:\/' >/dev/null 2>&1
+    echo "$backuplocation" | grep '.*:\/' >/dev/null 2>&1
     if [ $? -eq 0 ] ; then # SSH
       backup_ssh
       ret=$?
@@ -749,12 +749,12 @@ do
       exit_failure
     fi
   elif [ "$ret" -eq "0" ] ; then
-    locationssuccess=$(echo $locationssuccess + 1 | bc)
+    locationssuccess=$(echo "$locationssuccess" + 1 | bc)
     if ! [ "$backupemailsuccess" = "0" ]; then
       report_success
     fi
   else
-    locationsfailure=$(echo $locationsfailure + 1 | bc)
+    locationsfailure=$(echo "$locationsfailure" + 1 | bc)
     if ! [ "$backupemailfailure" = "0" ]; then
       report_failure
     fi

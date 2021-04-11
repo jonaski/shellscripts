@@ -29,19 +29,15 @@
 #
 # The format is: img-subdir-xxx-widthxheight.ext
 #
-# Last modified: 29/12-2007
-#
 ###########################################################################
 
 version="1.3.2"
-revision="20070410"
 
 # Basic settings
 
 logging=0					# Log all the changes to a file so you can see what has been done.
 logfile="prename.log"				# Filename of the logfile.
 renamedirs=1					# Remove '_' and '-' from dirs.
-createmd5sum=0					# Create a MD5 checksum file in each directory.
 
 
 ###########################################################################
@@ -52,7 +48,7 @@ createmd5sum=0					# Create a MD5 checksum file in each directory.
 
 c=''
 n=''
-if [ "`eval echo -n 'a'`" = "-n a" ] ; then
+if [ "$(eval echo -n 'a')" = "-n a" ] ; then
   c='\c'
 else
   n='-n'
@@ -99,7 +95,7 @@ logfile () {
   fi
 
   if [ "$logging" = "1" ] ; then
-    echo "`date` *** $1" >>"$pdir/$logfile" || exit 1
+    echo "$(date) *** $1" >>"$pdir/$logfile" || exit 1
   fi
 
 }
@@ -111,10 +107,10 @@ fi
 
 # Parse the photo directory.
 
-for ddir in $pdir/*
+for ddir in "$pdir"/*
 do
 
-  ddir=`echo $ddir | awk -F/ '{print $NF}'`
+  ddir=$(echo "$ddir" | awk -F/ '{print $NF}')
 
   # If this is not a directory, then skip it.
   if [ ! -d "${pdir}/${ddir}" ] ; then
@@ -124,7 +120,7 @@ do
   logfile "Entering directory \"$pdir/$ddir\"." 2
 
   if [ "$renamedirs" = "1" ] ; then
-    ddirnew=`echo $ddir | sed -e 's/_//g' -e 's/-//g'`
+    ddirnew=$(echo "$ddir" | sed -e 's/_//g' -e 's/-//g')
     if [ ! "$ddirnew" = "$ddir" ] ; then
       echo $n "Renaming \"$pdir/$ddir\" to \"$pdir/$ddirnew\". $c"
       mv "${pdir}/${ddir}" "${pdir}/${ddirnew}" || exit 1
@@ -140,15 +136,15 @@ do
 
   # Parse the files in the album.
 
-  for imagename in ${pdir}/${ddir}/*
+  for imagename in "${pdir}"/"${ddir}"/*
   do
 
-    imagename=`echo $imagename | awk -F/ '{print $NF}'`
-    imagenamefake=`echo $imagename |  sed 's/ /\:/g'`
+    imagename=$(echo "$imagename" | awk -F/ '{print $NF}')
+    imagenamefake=$(echo "$imagename" | sed 's/ /\:/g')
 
     # Create the imagelist and ignore all files except for known images.
     image=0
-    imagenamelow=`echo $imagename | tr 'A-Z' 'a-z'`
+    imagenamelow=$(echo "$imagename" | tr '[:upper:]' '[:lower:]')
     case "$imagenamelow" in
       *.bmp ) image=1;;
       *.jpg ) image=1;;
@@ -190,22 +186,22 @@ do
 
     # Set the real filename
 
-    imagename=`echo $imagenamefake | sed 's/:/\ /g'`
+    imagename=$(echo "$imagenamefake" | sed 's/:/\ /g')
 
     # Determine the image format and geometry for use in the filename.
 
     #echo $n "Dermining format and geometry for image \"$pdir/$ddir/$imagename\". $c"
-    identify=`identify "$pdir/$ddir/$imagename" | sed "s/${pdir}\/${ddir}\/${imagename} //g"` || exit 1
+    identify=$(identify "$pdir/$ddir/$imagename" | sed "s/${pdir}\/${ddir}\/${imagename} //g") || exit 1
     if [ "$identify" = "" ] ; then
       logfile "ERROR: Cannot determine format and geometry for image: \"$pdir/$ddir/$imagename\"." 2
       continue
     fi
-    format=`echo $identify | awk '{print $1}'` || exit 1
+    format=$(echo "$identify" | awk '{print $1}') || exit 1
     if [ "$format" = "" ] ; then
       logfile "ERROR: Cannot determine format for image: \"$pdir/$ddir/$imagename\"." 2
       continue
     fi
-    extension=`echo $format | tr 'A-Z' 'a-z'` || exit 1
+    extension=$(echo "$format" | tr '[:upper:]' '[:lower:]') || exit 1
     if [ "$extension" = "" ] ; then
       logfile "ERROR: Cannot determine extension for image: \"$pdir/$ddir/$imagename\"." 2
       continue
@@ -213,7 +209,7 @@ do
     case "$extension" in
       jpeg ) extension=jpg;;
     esac
-    geometry=`echo $identify | awk '{print $2}'` || exit 1
+    geometry=$(echo "$identify" | awk '{print $2}') || exit 1
     if [ "$geometry" = "" ] ; then
       logfile "ERROR: Cannot determine geometry for image: \"$pdir/$ddir/$imagename\"." 2
       continue
@@ -221,12 +217,12 @@ do
 
     # Geometry can be 563x144+0+0 or 75x98
     # we need to get rid of the plus (+) and the x characters:
-    width=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $1}'` || exit 1
+    width=$(echo "$geometry" | sed 's/[^0-9]/ /g' | awk '{print $1}') || exit 1
     if [ "$width" = "" ] ; then
       logfile "ERROR: Cannot determine width for image: \"$pdir/$ddir/$imagename\"." 2
       continue
     fi
-    height=`echo $geometry | sed 's/[^0-9]/ /g' | awk '{print $2}'` || exit 1
+    height=$(echo "$geometry" | sed 's/[^0-9]/ /g' | awk '{print $2}') || exit 1
     if [ "$height" = "" ] ; then
       logfile "ERROR: Cannot determine height for image: \"$pdir/$ddir/$imagename\"." 2
       continue
@@ -236,7 +232,7 @@ do
     # Determine image date for use in filename
     
     #echo $n "Dermining date for image \"$pdir/$ddir/$imagename\". $c"
-    date=`identify -format "%[exif:DateTimeOriginal]" "$pdir/$ddir/$imagename" | sed 's/\://g' | sed 's/ /-/g'` || exit 1
+    date=$(identify -format "%[exif:DateTimeOriginal]" "$pdir/$ddir/$imagename" | sed 's/\://g' | sed 's/ /-/g') || exit 1
     if [ "$date" = "" ] ; then
       logfile "ERROR: Cannot determine date for image: \"$pdir/$ddir/$imagename\"." 2
       continue
@@ -245,12 +241,12 @@ do
     
     # Calculate the image number for use in the filename.
 
-    count=`echo $count + 1 | bc`
-    if [ $count -gt 999 ] ; then
-      logfile "ERROR: Directory \"$pdir/$ddir/$sdir\" has more then 999 images. Skipping the rest."; 2
+    count=$(echo "$count" + 1 | bc)
+    if [ "$count" -gt 999 ] ; then
+      logfile "ERROR: Directory \"$pdir/$ddir\" has more then 999 images. Skipping the rest."; 2
       break
     fi
-    imagenumber=`echo $count | awk '{printf("%.3d", $1)}'` || exit 1
+    imagenumber=$(echo "$count" | awk '{printf("%.3d", $1)}') || exit 1
     if [ "$imagenumber" = "" ] ; then
       logfile "ERROR: Cannot format number for image: \"$pdir/$ddir/$imagename\"."; 2
       exit 1
@@ -267,8 +263,8 @@ do
         break
       fi
       if [ -f "$pdir/$ddir/$newname" ] ; then
-        count2=`echo $count2 + 1 | bc`
-        imagenumber2=`echo $count2 | awk '{printf("%.3d", $1)}'` || exit 1
+        count2=$(echo "$count2" + 1 | bc)
+        imagenumber2=$(echo "$count2" | awk '{printf("%.3d", $1)}') || exit 1
         logfile "ERROR: File \"$pdir/$ddir/$newname\" already exist, adding extra number $count2 at the end of the filename." 2
         newname="img-${date}-${imagenumber}-${width}x${height}-${imagenumber2}.${extension}"
         continue
