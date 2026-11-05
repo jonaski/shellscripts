@@ -1,7 +1,7 @@
-#!/bin/sh
+#!/bin/bash
 #
 #  portswatch.sh - Monitor Ports Watch
-#  Copyright (C) 2010 Jonas Kvinge
+#  Copyright (C) 2010-2026 Jonas Kvinge
 #
 #  This program is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -18,19 +18,25 @@
 #
 
 configfile="/etc/sysconfig/portswatch"
-lockfile="/tmp/portswatch.lock"
-lockfilettl=3600
-tmpfile="/tmp/portswatch.tmp"
-logfile="/tmp/portswatch.log"
-#log=1
-debug=1
-inettesthosts="8.8.8.8 8.8.4.4"			# Test all of these, only if 1 fails internet is reported to be down.
+if [ "$EUID" -eq 0 ]; then
+  statedir="/var/lib/portswatch"
+  logfile="/var/log/portswatch.log"
+else
+  statedir="$HOME/.local/state/portswatch"
+  logfile="$statedir/portswatch.log"
+fi
+lockfile="$statedir/portswatch.lock"
+tmpfile="$statedir/portswatch.state"
+logmaxsize=1048576				# The log is moved to .1 when it's bigger than this.
+debug=0
+inettesthosts="8.8.8.8 8.8.4.4"			# Internet is reported to be down only if all of these fail.
 pingtimeout=2
 connecttimeout=2
 maxfailtime=15
 reportfreq=120
 emailfrom="nobody"
 emailto="root"
+mailtimeout=60
 
 hosts="
 server1 ssh/tcp domain/udp domain/tcp smtp/tcp imaps/tcp pop3s/tcp http/tcp https/tcp
@@ -55,7 +61,7 @@ print() {
 }
 log() {
   timestamp
-  echo "[$TS] $*" >>${logfile}
+  echo "[$TS] $*" >>"$logfile"
 }
 statusprint() { color=8; print "$@"; }
 statuslog() { log "$@"; }
@@ -83,21 +89,49 @@ debug() {
 }
 
 isnum() {
+  [[ $1 =~ ^-?[0-9]+$ ]]
+}
 
-  echo "$1" | grep -E '^\-?[0-9]+$' >/dev/null 2>&1
-  return $?
+# Durations can be longer than a day, which %T alone would wrap around.
 
+duration() {
+  local seconds="$1" days=$(( $1 / 86400 ))
+  if [ "$days" -gt 0 ]; then
+    echo "${days}d $(date -u -d "@$(( seconds % 86400 ))" +%T)"
+  else
+    date -u -d "@$seconds" +%T
+  fi
+}
+
+html_escape() {
+  sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<< "$1"
+}
+
+# The state file has one line per key, with the key as the first field. Keys are compared literally since they can be URL's.
+
+state_get() {
+  awk -v key="$1" '$1 == key' "$tmpfile"
+}
+
+state_remove() {
+  local tmp
+  tmp=$(mktemp "$tmpfile.XXXXXX") || return 1
+  if awk -v key="$1" '$1 != key' "$tmpfile" > "$tmp"; then
+    mv -f -- "$tmp" "$tmpfile"
+  else
+    rm -f -- "$tmp"
+    return 1
+  fi
 }
 
 loadconfig() {
 
   if [ -f "$configfile" ]; then
-    . $configfile || {
-      error "Failed to load configuration file \"$configfile\"."
-      exit_safe 1
-   }
-  else
-    status "Configuration file not found: \"$configfile\" - Using defaults."
+    # shellcheck source=/dev/null
+    if ! . "$configfile"; then
+      errorprint "Failed to load configuration file \"$configfile\"."
+      exit 1
+    fi
   fi
 
 }
@@ -106,7 +140,6 @@ main() {
 
   init "$@"
 
-  cmdcheck
   inetstatus
   portswatch
 
@@ -116,35 +149,47 @@ main() {
 
   scriptend=$(date +%s)
   scripttime=$(echo "$scriptend" - "$scriptstart" | bc)
-  status "Script finished in $(date -u -d @${scripttime} +"%T")"
+  status "Script finished in $(duration "$scripttime")"
   
-  exit_safe 0
+  exit_safe "$scriptstatus"
 
 }
 
 init() {
 
   scriptstart=$(date +%s)
-  havelockfile=0
-
-  status "Monitor Ports Watch - Starting - $0"
+  scriptstatus=0
 
   loadconfig
 
-  if [ -f "$lockfile" ]; then
-    error "Script is already running. If this is incorrect, remove: $lockfile."
-    exit_safe
+  if ! mkdir -p -- "$(dirname -- "$tmpfile")" "$(dirname -- "$logfile")" "$(dirname -- "$lockfile")"; then
+    errorprint "Failed to create directories for \"$tmpfile\", \"$logfile\" and \"$lockfile\"."
+    exit 1
   fi
-  which lockfile >/dev/null 2>&1
-  if [ $? -eq 0 ] ; then
-    lockfile -r 0 -l "$lockfilettl" "$lockfile" || { exit_safe 1; }
-  else
-    touch "$lockfile" || { exit_safe 1; }
+  if [ -f "$logfile" ] && [ "$(stat -c %s -- "$logfile")" -gt "$logmaxsize" ]; then
+    mv -f -- "$logfile" "$logfile.1"
   fi
-  havelockfile=1
+  if ! touch -- "$tmpfile" "$logfile"; then
+    errorprint "Failed to write to \"$tmpfile\" or \"$logfile\"."
+    exit 1
+  fi
 
-  touch $tmpfile || exit_safe 1
-  touch $logfile || exit_safe 1
+  status "Monitor Ports Watch - Starting - $0"
+  if ! [ -f "$configfile" ]; then
+    status "Configuration file not found: \"$configfile\" - Using defaults."
+  fi
+
+  cmdcheck
+
+  # The lock belongs to this process and is released by the system when it ends, also when it's killed.
+  if ! exec 9>>"$lockfile"; then
+    error "Failed to open lockfile: \"$lockfile\"."
+    exit 1
+  fi
+  if ! flock -n 9; then
+    error "Script is already running, it holds the lock on: $lockfile."
+    exit 1
+  fi
 
 }
 
@@ -152,11 +197,7 @@ exit_safe() {
 
   debug "exit_safe()"
 
-  if [ "$havelockfile" -eq 1 ]; then
-    rm -f $lockfile
-  fi
-
-  exit $?
+  exit "${1:-0}"
 
 }
 
@@ -166,12 +207,11 @@ cmdcheck() {
 
   debug "cmdcheck()"
 
-  cmds="which cat cut tr sed grep bc cp mv rm mkdir date hostname ssh tput ping nc mutt"
+  cmds="awk bc cut date dig dirname flock grep mkdir mktemp mutt mv nc ping sed stat timeout touch tput"
   for cmd in $cmds
   do
-    which "$cmd" >/dev/null 2>&1
-    if [ $? != 0 ] ; then
-      echo "ERROR: Missing \"${cmd}\" command!"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      error "Missing \"${cmd}\" command!"
       exit_safe 1
     fi
   done
@@ -184,56 +224,43 @@ inetstatus() {
 
   debug "inetstatus()"
 
-  #inetwasdown=
   inetwasdowntext=
 
   inetup=0
   for inettesthost in $inettesthosts
   do
-    pingtext=$(ping -c 1 -W "${pingtimeout}" "${inettesthost}")
-    r=$?
-    if [ $r = 0 ] ; then
+    if ping -c 1 -W "${pingtimeout}" "${inettesthost}" >/dev/null 2>&1; then
       inetup=1
       break
     fi
   done
 
-  if [ "$inetup" -eq 1 ]; then
-    status "Internet connection found to be up."
-    entry=$(grep -i "INETDOWN Time=.*" ${tmpfile})
-    if ! [ "$entry" = "" ]; then
-      #inetwasdown=1
-      #rm -f ${tmpfile} || exit_safe 1
-      #touch ${tmpfile} || exit_safe 1
-      sed -i "/^INETDOWN .*$/d" ${tmpfile}
-      timenow=$(date +%s)
-      entrytime=$(echo "$entry" | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
-      if isnum "$entrytime" ; then
-        time=$(echo "$timenow" - "$entrytime" | bc)
-        timetext=$(date -u -d @${time} +"%T")
-        inetwasdowntext="Internet was down $timetext"
-        status "$inetwasdowntext"
-      else
-        inetwasdowntext="Internet was down - Failed to calculate downtime."
-        status "$inetwasdowntext"
-        entrytime=0
-      fi
-    fi
-    return $r
-  else
+  entry=$(state_get INETDOWN)
+
+  if [ "$inetup" -eq 0 ]; then
     status "Internet connection was found to be down."
-    entry=$(grep -i "INETDOWN Time=.*" ${tmpfile})
     if [ "$entry" = "" ]; then
-      timenow=$(date +%s)
-      echo "INETDOWN Time=${timenow}" >${tmpfile}
+      echo "INETDOWN Time=$(date +%s)" >>"$tmpfile"
       debug "Internet was found to be down - Writing to ${tmpfile}"
     else
       debug "Internet was found to be down - Existing info found in ${tmpfile}"
     fi
-    exit_safe $r
+    exit_safe 1
   fi
-  return $r
-  
+
+  status "Internet connection found to be up."
+  if ! [ "$entry" = "" ]; then
+    state_remove INETDOWN
+    entrytime=$(echo "$entry" | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
+    if isnum "$entrytime" ; then
+      time=$(( $(date +%s) - entrytime ))
+      inetwasdowntext="Internet was down $(duration "$time")"
+    else
+      inetwasdowntext="Internet was down - Failed to calculate downtime."
+    fi
+    status "$inetwasdowntext"
+  fi
+
   debug "inetstatus() finished"
 
 }
@@ -242,12 +269,8 @@ portswatch() {
 
   debug "portswatch()"
 
-  #i=0
-  IFS_DEFAULT=$IFS
-  IFS=$'\n'
-  for l in ${hosts}
+  while IFS= read -r l
   do
-    IFS=$IFS_DEFAULT
     if [ "$l" = "" ]; then
       continue
     fi
@@ -262,38 +285,60 @@ portswatch() {
     readfile
     for portent in $ports
     do
-      port=$(echo "$portent" | cut -d '/' -f1)
-      protocol=$(echo "$portent" | cut -d '/' -f2)
       status "Checking host: $host - port: $portent"
-      if [ "$protocol" = "tcp" ]; then
-        nc -zw ${connecttimeout} "$host" "$port"
-      elif [ "$protocol" = "udp" ]; then
-        nc -zuw ${connecttimeout} "$host" "$port"
+      portcheck "$portent"
+      if [ "$status" = "up" ]; then
+        status "Host: $host - Port: $portent - Status: Up"
       else
-        continue
-      fi
-      if [ $? -eq 0 ]; then # Port is up
-        status="up"
-	status "Host: $host - Port: $portent - Status: Up"
-      else
-        status="down"
-        status "Host: $host - Port: $portent - Status: Down"
+        status "Host: $host - Port: $portent - Status: ${status^}"
         fail=1
-	if [ "$failtime" -le 1 ]; then
-	  failtime=$(date +%s)
-	fi
+        if [ "$failtime" -le 1 ]; then
+          failtime=$(date +%s)
+        fi
       fi
       portsstatus_add
     done
 
     portswatchdata="$portswatchdata
 Host: $host - ${ports_status_html} <br />"
-    
+
     writefile
-  done
-  
+  done <<< "$hosts"
+
   debug "portswatch() finished"
-  
+
+}
+
+# Check one port and set status. UDP has no connection to test, so nc only notices a port that actively refuses and reports everything else as up. DNS is tested with a real query instead.
+
+portcheck() {
+
+  local port protocol
+  port=$(echo "$1" | cut -d '/' -f1)
+  protocol=$(echo "$1" | cut -d '/' -f2)
+
+  status="down"
+  case "$protocol" in
+    tcp)
+      if timeout "$((connecttimeout + 1))" nc -zw "$connecttimeout" "$host" "$port" >/dev/null 2>&1; then
+        status="up"
+      fi
+      ;;
+    udp)
+      if [ "$port" = "domain" ] || [ "$port" = "53" ]; then
+        if timeout "$((connecttimeout + 1))" dig +time="$connecttimeout" +tries=1 "@$host" . SOA >/dev/null 2>&1; then
+          status="up"
+        fi
+      elif timeout "$((connecttimeout + 1))" nc -zuw "$connecttimeout" "$host" "$port" >/dev/null 2>&1; then
+        status="up"
+      fi
+      ;;
+    *)
+      error "Invalid protocol in \"$1\" for host \"$host\", use tcp or udp."
+      status="invalid"
+      ;;
+  esac
+
 }
     
 readfile() {
@@ -306,7 +351,7 @@ readfile() {
   entrytime=0
   entry_ports_status=
 
-  entry=$(grep -i "^$host .*" ${tmpfile})
+  entry=$(state_get "$host")
   if [ "$entry" = "" ]; then
     return
   fi
@@ -356,7 +401,7 @@ readfile() {
 
   timenow=$(date +%s)
   time=$(echo "$timenow" - "$entrytime" | bc)
-debug "Entry with timestamp \"${entrytime}\" ($(date -u -d @${time} +"%T") ago) found for host \"$host\". Status: $entry_ports_status Fail: $entryfail FailTime: $failtime ReportTime: $reporttime"
+debug "Entry with timestamp \"${entrytime}\" ($(duration "$time") ago) found for host \"$host\". Status: $entry_ports_status Fail: $entryfail FailTime: $failtime ReportTime: $reporttime"
   
   debug "readfile() finished"
   
@@ -393,18 +438,10 @@ writefile() {
   debug "ports_status_____ : $ports_status"
   debug "entry_ports_status: $entry_ports_status"
   
-  echo "$entry" | grep -i "^$host ${ports_status} .*" >/dev/null 2>&1
-  if [ $? -eq 0 ]; then
-    changed=0
-  else
-    changed=1
-  fi
 
   timenow=$(date +%s)
   failtime_bc=$(echo "$timenow" - "$failtime" | bc)
   reporttime_bc=$(echo "$timenow" - "$reporttime" | bc)
-
-  debug "Host: $host - Changed=$changed"
 
   if [ "$entry" = "" ]; then
     entrytime=$(date +%s)
@@ -413,7 +450,7 @@ writefile() {
     reporttime=$timenow
   elif [ "$fail" -eq 1 ] && [ "$failtime_bc" -ge "$maxfailtime" ]; then
     entryfail=1
-    summary_add "One or more ports on \"$host\" failed for more than $(date -u -d @$maxfailtime +"%T")."
+    summary_add "One or more ports on \"$host\" failed for more than $(duration "$maxfailtime")."
     if [ "$reporttime_bc" -ge "$reportfreq" ]; then
       sendreport=1
       reporttime=$timenow
@@ -435,8 +472,8 @@ writefile() {
     entrytime=$(date +%s)
   fi
 
-  sed -i "/^${host} .*$/d" ${tmpfile}
-  echo "${host} ${ports_status} ${entryfail} ${failtime} ${reporttime} ${entrytime}" >>${tmpfile}
+  state_remove "$host"
+  echo "${host} ${ports_status} ${entryfail} ${failtime} ${reporttime} ${entrytime}" >>"$tmpfile"
 
   debug "writefile() finished"
 
@@ -444,11 +481,14 @@ writefile() {
 
 summary_add() {
 
+  local text
+  text=$(html_escape "$1")
+
   if [ "$summary" = "" ]; then
-    summary="$1<br />"
+    summary="$text<br />"
   else
     summary="$summary
-    $1<br />"
+    $text<br />"
   fi
 
 }
@@ -486,18 +526,23 @@ sendreport() {
   report_add "Status:<br />"
   report_add "$portswatchdata"
   report_add "<br />"
-  report_add "New report is sent every $(date -u -d @${reportfreq} +"%T") if status is changed or there is an error."
+  report_add "New report is sent every $(duration "$reportfreq") if status is changed or there is an error."
   report_add "</body>"
   report_add "</html>"
 
+  read -r -a recipients <<< "$emailto"
+
   LANG=en_GB
-  EMAIL=$emailfrom mutt -e 'set content_type=text/html' -s "Monitor Ports Watch" $emailto <<EOT
+  if ! EMAIL=$emailfrom timeout "$mailtimeout" mutt -e 'set content_type=text/html' -s "Monitor Ports Watch" "${recipients[@]}" <<EOT
   $reportdata
 EOT
+  then
+    error "Failed to send report to $emailto."
+    scriptstatus=1
+  fi
 
   debug "sendreport() finished"
 
 }
 
 main "$@"
-exit_safe 0

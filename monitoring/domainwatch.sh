@@ -1,7 +1,7 @@
-#!/bin/sh
+#!/bin/bash
 #
 #  domainwatch.sh - Monitor Domain Watch
-#  Copyright (C) 2017 Jonas Kvinge
+#  Copyright (C) 2017-2026 Jonas Kvinge
 #
 #  This program is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -18,20 +18,27 @@
 #
 
 configfile="/etc/sysconfig/domainwatch"
-lockfile="/tmp/domainwatch.lock"
-lockfilettl=3600
-tmpfile="/tmp/domainwatch.tmp"
-logfile="/tmp/domainwatch.log"
-#log=1
-debug=1
-inettesthosts="8.8.8.8 8.8.4.4"			# Test all of these, only if 1 fails internet is reported to be down.
+if [ "$EUID" -eq 0 ]; then
+  statedir="/var/lib/domainwatch"
+  logfile="/var/log/domainwatch.log"
+else
+  statedir="$HOME/.local/state/domainwatch"
+  logfile="$statedir/domainwatch.log"
+fi
+lockfile="$statedir/domainwatch.lock"
+tmpfile="$statedir/domainwatch.state"
+logmaxsize=1048576				# The log is moved to .1 when it's bigger than this.
+debug=0
+inettesthosts="8.8.8.8 8.8.4.4"			# Internet is reported to be down only if all of these fail.
 pingtimeout=2
-#maxfailtime=1
 reportfreq=3600
 emailfrom="nobody"
 emailto="root"
+mailtimeout=60
 
 domains="test1.com test2.com test3.com"
+whoistimeout=30
+availablepatterns='^% No match$|^No match for |^NOT FOUND|^Domain not found|^No Data Found|^No entries found|^Status: *(free|available)'	# Answers from registries when a domain is not registered.
 
 timestamp() { TS=$(date '+%d/%m-%Y %H:%M:%S'); }
 
@@ -77,19 +84,49 @@ debug() {
 }
 
 isnum() {
-  echo "$1" | grep -E '^\-?[0-9]+$' >/dev/null 2>&1
-  return $?
+  [[ $1 =~ ^-?[0-9]+$ ]]
+}
+
+# Durations can be longer than a day, which %T alone would wrap around.
+
+duration() {
+  local seconds="$1" days=$(( $1 / 86400 ))
+  if [ "$days" -gt 0 ]; then
+    echo "${days}d $(date -u -d "@$(( seconds % 86400 ))" +%T)"
+  else
+    date -u -d "@$seconds" +%T
+  fi
+}
+
+html_escape() {
+  sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<< "$1"
+}
+
+# The state file has one line per key, with the key as the first field. Keys are compared literally since they can be URL's.
+
+state_get() {
+  awk -v key="$1" '$1 == key' "$tmpfile"
+}
+
+state_remove() {
+  local tmp
+  tmp=$(mktemp "$tmpfile.XXXXXX") || return 1
+  if awk -v key="$1" '$1 != key' "$tmpfile" > "$tmp"; then
+    mv -f -- "$tmp" "$tmpfile"
+  else
+    rm -f -- "$tmp"
+    return 1
+  fi
 }
 
 loadconfig() {
 
   if [ -f "$configfile" ]; then
-    . $configfile || {
-      error "Failed to load configuration file \"$configfile\"."
-      exit_safe 1
-   }
-  else
-    status "Configuration file not found: \"$configfile\" - Using defaults."
+    # shellcheck source=/dev/null
+    if ! . "$configfile"; then
+      errorprint "Failed to load configuration file \"$configfile\"."
+      exit 1
+    fi
   fi
 
 }
@@ -98,7 +135,6 @@ main() {
 
   init "$@"
 
-  cmdcheck
   inetstatus
   domainwatch
 
@@ -108,47 +144,56 @@ main() {
 
   scriptend=$(date +%s)
   scripttime=$(echo "$scriptend" - "$scriptstart" | bc)
-  status "Script finished in $(date -u -d @${scripttime} +"%T")"
+  status "Script finished in $(duration "$scripttime")"
 
-  exit_safe 0
+  exit_safe "$scriptstatus"
 
 }
 
 init() {
 
   scriptstart=$(date +%s)
-  havelockfile=0
-  
-  status "Monitor Domain Watch - Starting - $0"
+  scriptstatus=0
 
   loadconfig
 
-  if [ -f "$lockfile" ]; then
-    error "Script is already running. If this is incorrect, remove: $lockfile."
-    exit_safe
+  if ! mkdir -p -- "$(dirname -- "$tmpfile")" "$(dirname -- "$logfile")" "$(dirname -- "$lockfile")"; then
+    errorprint "Failed to create directories for \"$tmpfile\", \"$logfile\" and \"$lockfile\"."
+    exit 1
   fi
-  which lockfile >/dev/null 2>&1
-  if [ $? -eq 0 ] ; then
-    lockfile -r 0 -l "$lockfilettl" "$lockfile" || { exit_safe 1; }
-  else
-    touch "$lockfile" || { exit_safe 1; }
+  if [ -f "$logfile" ] && [ "$(stat -c %s -- "$logfile")" -gt "$logmaxsize" ]; then
+    mv -f -- "$logfile" "$logfile.1"
   fi
-  havelockfile=1
+  if ! touch -- "$tmpfile" "$logfile"; then
+    errorprint "Failed to write to \"$tmpfile\" or \"$logfile\"."
+    exit 1
+  fi
 
-  touch "$tmpfile" || exit_safe 1
-  touch "$logfile" || exit_safe 1
+  status "Monitor Domain Watch - Starting - $0"
+  if ! [ -f "$configfile" ]; then
+    status "Configuration file not found: \"$configfile\" - Using defaults."
+  fi
+
+  cmdcheck
+
+  # The lock belongs to this process and is released by the system when it ends, also when it's killed.
+  if ! exec 9>>"$lockfile"; then
+    error "Failed to open lockfile: \"$lockfile\"."
+    exit 1
+  fi
+  if ! flock -n 9; then
+    error "Script is already running, it holds the lock on: $lockfile."
+    exit 1
+  fi
 
 }
 
 exit_safe() {
 
   debug "exit_safe()"
-  
-  if [ "$havelockfile" -eq 1 ]; then
-    rm -f "$lockfile"
-  fi
 
-  exit $?
+  exit "${1:-0}"
+
 }
 
 #  Check that we got all the needed commands
@@ -157,12 +202,11 @@ cmdcheck() {
 
   debug "cmdcheck()"
 
-  cmds="which cat cut tr sed grep bc cp mv rm mkdir date hostname mail ssh tput ping whois mutt"
+  cmds="awk bc cut date dirname flock grep mkdir mktemp mutt mv ping sed stat timeout touch tput whois"
   for cmd in $cmds
   do
-    which "$cmd" >/dev/null 2>&1
-    if [ $? != 0 ] ; then
-      echo "ERROR: Missing \"${cmd}\" command!"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      error "Missing \"${cmd}\" command!"
       exit_safe 1
     fi
   done
@@ -175,56 +219,43 @@ inetstatus() {
 
   debug "inetstatus()"
 
-  #inetwasdown=
   inetwasdowntext=
-  
+
   inetup=0
   for inettesthost in $inettesthosts
   do
-    pingtext=$(ping -c 1 -W "${pingtimeout}" "${inettesthost}")
-    r=$?
-    if [ $r = 0 ] ; then
+    if ping -c 1 -W "${pingtimeout}" "${inettesthost}" >/dev/null 2>&1; then
       inetup=1
       break
     fi
   done
-  
-  if [ "$inetup" -eq 1 ]; then
-    status "Internet connection found to be up."
-    entry=$(grep -i "INETDOWN Time=.*" ${tmpfile})
-    if ! [ "$entry" = "" ]; then
-      #inetwasdown=1
-      #rm -f ${tmpfile} || exit_safe 1
-      #touch ${tmpfile} || exit_safe 1
-      sed -i "/^INETDOWN .*$/d" ${tmpfile}
-      timenow=$(date +%s)
-      entrytime=$(echo "$entry" | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
-      if isnum "$entrytime" ; then
-        time=$(echo "$timenow" - "$entrytime" | bc)
-        timetext=$(date -u -d @${time} +"%T")
-        inetwasdowntext="Internet was down $timetext"
-        status "$inetwasdowntext"
-      else
-        inetwasdowntext="Internet was down - Failed to calculate downtime."
-        status "$inetwasdowntext"
-        entrytime=0
-      fi
-    fi
-    return $r
-  else
+
+  entry=$(state_get INETDOWN)
+
+  if [ "$inetup" -eq 0 ]; then
     status "Internet connection was found to be down."
-    entry=$(grep -i "INETDOWN Time=.*" ${tmpfile})
     if [ "$entry" = "" ]; then
-      timenow=$(date +%s)
-      echo "INETDOWN Time=${timenow}" >${tmpfile}
+      echo "INETDOWN Time=$(date +%s)" >>"$tmpfile"
       debug "Internet was found to be down - Writing to ${tmpfile}"
     else
       debug "Internet was found to be down - Existing info found in ${tmpfile}"
     fi
-    exit_safe $r
+    exit_safe 1
   fi
-  return $r
-  
+
+  status "Internet connection found to be up."
+  if ! [ "$entry" = "" ]; then
+    state_remove INETDOWN
+    entrytime=$(echo "$entry" | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
+    if isnum "$entrytime" ; then
+      time=$(( $(date +%s) - entrytime ))
+      inetwasdowntext="Internet was down $(duration "$time")"
+    else
+      inetwasdowntext="Internet was down - Failed to calculate downtime."
+    fi
+    status "$inetwasdowntext"
+  fi
+
   debug "inetstatus() finished"
 
 }
@@ -236,36 +267,19 @@ domainwatch() {
   for domain in ${domains}
   do
     readfile
-    status=
     available=0
-    result_html=
-    output=$(whois "$domain" 2>&1)
-    if [ $? -eq 0 ]; then
-      IFS_DEFAULT=$IFS
-      IFS=$'\n'
-      for line in $output
-      do
-        IFS=$IFS_DEFAULT
-	echo "$line" | grep '^% No match$' >/dev/null 2>&1
-        if [ $? -eq 0 ]; then
-          status="available"
-          result_html="<font color=\"green\">Available</font>"
-          available=1
-        fi
-      done
-      if [ "$status" = "" ]; then
-        status="taken"
-        result_html="<font color=\"red\">Taken</font>"
-        available=0
-      fi
-    elif [ $? -eq 1 ]; then
+    output=$(timeout "$whoistimeout" whois "$domain" 2>&1)
+    r=$?
+    if grep -Eqi -- "$availablepatterns" <<< "$output"; then
       status="available"
       result_html="<font color=\"green\">Available</font>"
       available=1
+    elif [ "$r" -eq 0 ] && [ -n "$output" ]; then
+      status="taken"
+      result_html="<font color=\"red\">Taken</font>"
     else
       status="error"
       result_html="<font color=\"red\">Error</font>"
-      available=0
     fi
 
     status "Domain: $domain Status: $status"
@@ -274,9 +288,9 @@ domainwatch() {
 
     maildata="$maildata
 Domain: $domain - ${result_html}<br />"
-    
+
   done
-  
+
   debug "domainwatch() finished"
 
 }
@@ -285,14 +299,11 @@ readfile() {
 
   debug "readfile()"
 
-  #entryfail=0
-  #failtime=0
   reporttime=0
   entrytime=0
   entrystatus=
-  #entryresult=
 
-  entry=$(grep -i "^${domain} .*" ${tmpfile})
+  entry=$(state_get "$domain")
   if [ "$entry" = "" ]; then
     return
   fi
@@ -320,7 +331,7 @@ readfile() {
 
   timenow=$(date +%s)
   time=$(echo "$timenow" - "$entrytime" | bc)
-debug "Entry with timestamp \"${entrytime}\" ($(date -u -d @${time} +"%T") ago) found for domain \"$domain\". Status: $entrystatus ReportTime: $reporttime"
+debug "Entry with timestamp \"${entrytime}\" ($(duration "$time") ago) found for domain \"$domain\". Status: $entrystatus ReportTime: $reporttime"
   
   debug "readfile() finished"
   
@@ -330,14 +341,6 @@ writefile() {
 
   debug "writefile()"
   
-  echo "$entry" | grep -i "^${domain} ${status} .*" >/dev/null 2>&1
-  if [ $? -eq 0 ]; then
-    changed=0
-  else
-    changed=1
-  fi
-  debug "domain: ${domain} - Changed=$changed"
-
   timenow=$(date +%s)
   reporttime_bc=$(echo "$timenow" - "$reporttime" | bc)
 
@@ -352,14 +355,20 @@ writefile() {
       sendreport=1
       reporttime=$(date +%s)
     fi
+  elif [ "$status" = "error" ]; then
+    summary_add "Failed to look up domain \"$domain\": $output"
+    if [ "$reporttime_bc" -ge "$reportfreq" ]; then
+      sendreport=1
+      reporttime=$(date +%s)
+    fi
   fi
 
   if [ "$entrytime" -le 0 ]; then
     entrytime=$(date +%s)
   fi
 
-  sed -i "/^${domain} .*$/d" $tmpfile
-  echo "${domain} ${status} ${reporttime} ${entrytime}" >>${tmpfile}
+  state_remove "$domain"
+  echo "${domain} ${status} ${reporttime} ${entrytime}" >>"$tmpfile"
 
   debug "writefile() finished"
 
@@ -367,11 +376,14 @@ writefile() {
 
 summary_add() {
 
+  local text
+  text=$(html_escape "$1")
+
   if [ "$summary" = "" ]; then
-    summary="$1<br />"
+    summary="$text<br />"
   else
     summary="$summary
-    $1<br />"
+    $text<br />"
   fi
 
 }
@@ -410,16 +422,24 @@ sendreport() {
   report_add "Status:<br />"
   report_add "$maildata"
   report_add "<br />"
-  report_add "New report is sent every $(date -u -d @${reportfreq} +"%T")."
+  report_add "New report is sent every $(duration "$reportfreq")."
+
+  report_add "</body>"
+  report_add "</html>"
+
+  read -r -a recipients <<< "$emailto"
 
   LANG=en_GB
-  EMAIL=$emailfrom mutt -e 'set content_type=text/html' -s "Monitor domain Watch" $emailto <<EOT
+  if ! EMAIL=$emailfrom timeout "$mailtimeout" mutt -e 'set content_type=text/html' -s "Monitor domain Watch" "${recipients[@]}" <<EOT
   $reportdata
 EOT
+  then
+    error "Failed to send report to $emailto."
+    scriptstatus=1
+  fi
 
   debug "sendreport() finished"
 
 }
 
 main "$@"
-exit_safe 0

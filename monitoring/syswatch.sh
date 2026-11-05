@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 #  syswatch.sh - Monitor System Watch
-#  Copyright (C) 2010 Jonas Kvinge
+#  Copyright (C) 2010-2026 Jonas Kvinge
 #
 #  This program is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -18,20 +18,26 @@
 #
 
 configfile="/etc/sysconfig/syswatch"
-#hostname=$(hostname -s)
-lockfile="/tmp/syswatch.lock"
-lockfilettl=3600
-tmpfile="/tmp/syswatch.tmp"
-logfile="/tmp/syswatch.log"
-#log=1
-debug=1
+if [ "$EUID" -eq 0 ]; then
+  statedir="/var/lib/syswatch"
+  logfile="/var/log/syswatch.log"
+else
+  statedir="$HOME/.local/state/syswatch"
+  logfile="$statedir/syswatch.log"
+fi
+lockfile="$statedir/syswatch.lock"
+tmpfile="$statedir/syswatch.state"
+logmaxsize=1048576				# The log is moved to .1 when it's bigger than this.
+debug=0
 reportfreq=180
 pingtimeout=2
 connecttimeout=2
-options="-o ConnectTimeout=${connecttimeout} -oBatchMode=yes"
+options=""					# Extra options for ssh.
+sshtimeout=30
 inettesthosts="8.8.8.8 8.8.4.4"
 emailfrom="nobody"
 emailto="root"
+mailtimeout=60
 
 maxcpu=70.00
 maxhdd=90
@@ -60,7 +66,7 @@ print() {
 }
 log() {
   timestamp
-  echo "[$TS] $*" >>${logfile}
+  echo "[$TS] $*" >>"$logfile"
 }
 statusprint() { color=8; print "$@"; }
 statuslog() { log "$@"; }
@@ -88,14 +94,44 @@ debug() {
 }
 
 isnum() {
+  [[ $1 =~ ^-?[0-9]+$ ]]
+}
 
-  echo "$1" | grep -E '^\-?[0-9]+$' >/dev/null 2>&1
-  return $?
+# Durations can be longer than a day, which %T alone would wrap around.
+
+duration() {
+  local seconds="$1" days=$(( $1 / 86400 ))
+  if [ "$days" -gt 0 ]; then
+    echo "${days}d $(date -u -d "@$(( seconds % 86400 ))" +%T)"
+  else
+    date -u -d "@$seconds" +%T
+  fi
+}
+
+html_escape() {
+  sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<< "$1"
+}
+
+# The state file has one line per key, with the key as the first field. Keys are compared literally since they can be URL's.
+
+state_get() {
+  awk -v key="$1" '$1 == key' "$tmpfile"
+}
+
+state_remove() {
+  local tmp
+  tmp=$(mktemp "$tmpfile.XXXXXX") || return 1
+  if awk -v key="$1" '$1 != key' "$tmpfile" > "$tmp"; then
+    mv -f -- "$tmp" "$tmpfile"
+  else
+    rm -f -- "$tmp"
+    return 1
+  fi
 }
 
 human_print() {
 
-  while read B dummy; do
+  while read -r B _; do
     [ "$B" -lt 1024 ] && echo "${B}" && break
     KB=$(((B+512)/1024))
     [ "$KB" -lt 1024 ] && echo "${KB}K" && break
@@ -113,12 +149,11 @@ human_print() {
 loadconfig() {
 
   if [ -f "$configfile" ]; then
-    . $configfile || {
-      error "Failed to load configuration file \"$configfile\"."
-      exit_safe 1
-   }
-  else
-    status "Configuration file not found: \"$configfile\" - Using defaults."
+    # shellcheck source=/dev/null
+    if ! . "$configfile"; then
+      errorprint "Failed to load configuration file \"$configfile\"."
+      exit 1
+    fi
   fi
 
 }
@@ -126,26 +161,41 @@ loadconfig() {
 init() {
 
   scriptstart=$(date +%s)
-  havelockfile=0
-  
-  status "Monitor System Watch - Starting - $0"
+  scriptstatus=0
 
   loadconfig
 
-  if [ -f "$lockfile" ]; then
-    error "Script is already running. If this is incorrect, remove: $lockfile."
-    exit_safe
-  fi
-  which lockfile >/dev/null 2>&1
-  if [ $? -eq 0 ] ; then
-    lockfile -r 0 -l $lockfilettl $lockfile || { exit_safe 1; }
-  else
-    touch $lockfile || { exit_safe 1; }
-  fi
-  havelockfile=1
+  read -r -a sshoptions <<< "$options"
+  sshoptions+=(-n -o "ConnectTimeout=$connecttimeout" -o BatchMode=yes)
 
-  touch $tmpfile || exit_safe 1
-  touch $logfile || exit_safe 1
+  if ! mkdir -p -- "$(dirname -- "$tmpfile")" "$(dirname -- "$logfile")" "$(dirname -- "$lockfile")"; then
+    errorprint "Failed to create directories for \"$tmpfile\", \"$logfile\" and \"$lockfile\"."
+    exit 1
+  fi
+  if [ -f "$logfile" ] && [ "$(stat -c %s -- "$logfile")" -gt "$logmaxsize" ]; then
+    mv -f -- "$logfile" "$logfile.1"
+  fi
+  if ! touch -- "$tmpfile" "$logfile"; then
+    errorprint "Failed to write to \"$tmpfile\" or \"$logfile\"."
+    exit 1
+  fi
+
+  status "Monitor System Watch - Starting - $0"
+  if ! [ -f "$configfile" ]; then
+    status "Configuration file not found: \"$configfile\" - Using defaults."
+  fi
+
+  cmdcheck
+
+  # The lock belongs to this process and is released by the system when it ends, also when it's killed.
+  if ! exec 9>>"$lockfile"; then
+    error "Failed to open lockfile: \"$lockfile\"."
+    exit 1
+  fi
+  if ! flock -n 9; then
+    error "Script is already running, it holds the lock on: $lockfile."
+    exit 1
+  fi
 
 }
 
@@ -153,7 +203,6 @@ main() {
 
   init "$@"
 
-  cmdcheck
   inetstatus
   syswatch
 
@@ -163,21 +212,17 @@ main() {
 
   scriptend=$(date +%s)
   scripttime=$(echo "$scriptend" - "$scriptstart" | bc)
-  status "Script finished in $(date -u -d @${scripttime} +"%T")"
+  status "Script finished in $(duration "$scripttime")"
 
-  exit_safe 0
+  exit_safe "$scriptstatus"
 
 }
 
 exit_safe() {
 
   debug "exit_safe()"
-  
-  if [ "$havelockfile" -eq 1 ]; then
-    rm -f $lockfile
-  fi
 
-  exit $?
+  exit "${1:-0}"
 
 }
 
@@ -187,16 +232,15 @@ cmdcheck() {
 
   debug "cmdcheck()"
 
-  cmds="test which cat cut tr sed grep bc cp mv rm mkdir date hostname ssh tput curl mutt ps head sort sar touch ping"
+  cmds="awk bc cut date dirname flock grep mkdir mktemp mutt mv ping sed ssh stat timeout touch tput tr"
   for cmd in $cmds
   do
-    which "$cmd" >/dev/null 2>&1
-    if [ $? != 0 ] ; then
+    if ! command -v "$cmd" >/dev/null 2>&1; then
       error "Missing \"${cmd}\" command!"
       exit_safe 1
     fi
   done
-  
+
   debug "cmdcheck() finished"
 
 }
@@ -205,56 +249,43 @@ inetstatus() {
 
   debug "inetstatus()"
 
-  #inetwasdown=
   inetwasdowntext=
-  
+
   inetup=0
   for inettesthost in $inettesthosts
   do
-    pingtext=$(ping -c 1 -W "${pingtimeout}" "${inettesthost}")
-    r=$?
-    if [ $r = 0 ] ; then
+    if ping -c 1 -W "${pingtimeout}" "${inettesthost}" >/dev/null 2>&1; then
       inetup=1
       break
     fi
   done
-  
-  if [ "$inetup" -eq 1 ]; then
-    status "Internet connection found to be up."
-    entry=$(grep -i "INETDOWN Time=.*" ${tmpfile})
-    if ! [ "$entry" = "" ]; then
-      #inetwasdown=1
-      #rm -f ${tmpfile} || exit_safe 1
-      #touch ${tmpfile} || exit_safe 1
-      sed -i "/^INETDOWN .*$/d" ${tmpfile}
-      timenow=$(date +%s)
-      entrytime=$(echo "$entry" | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
-      if isnum "$entrytime" ; then
-        time=$(echo "$timenow" - "$entrytime" | bc)
-        timetext=$(date -u -d @${time} +"%T")
-        inetwasdowntext="Internet was down $timetext"
-        status "$inetwasdowntext"
-      else
-        inetwasdowntext="Internet was down - Failed to calculate downtime."
-        status "$inetwasdowntext"
-        entrytime=0
-      fi
-    fi
-    return $r
-  else
+
+  entry=$(state_get INETDOWN)
+
+  if [ "$inetup" -eq 0 ]; then
     status "Internet connection was found to be down."
-    entry=$(grep -i "INETDOWN Time=.*" ${tmpfile})
     if [ "$entry" = "" ]; then
-      timenow=$(date +%s)
-      echo "INETDOWN Time=${timenow}" >${tmpfile}
+      echo "INETDOWN Time=$(date +%s)" >>"$tmpfile"
       debug "Internet was found to be down - Writing to ${tmpfile}"
     else
       debug "Internet was found to be down - Existing info found in ${tmpfile}"
     fi
-    exit_safe $r
+    exit_safe 1
   fi
-  return $r
-  
+
+  status "Internet connection found to be up."
+  if ! [ "$entry" = "" ]; then
+    state_remove INETDOWN
+    entrytime=$(echo "$entry" | sed -e 's/.* Time=\(.*\).*/\1/g' | cut -d' ' -f1)
+    if isnum "$entrytime" ; then
+      time=$(( $(date +%s) - entrytime ))
+      inetwasdowntext="Internet was down $(duration "$time")"
+    else
+      inetwasdowntext="Internet was down - Failed to calculate downtime."
+    fi
+    status "$inetwasdowntext"
+  fi
+
   debug "inetstatus() finished"
 
 }
@@ -263,25 +294,9 @@ syswatch() {
 
   debug "syswatch()"
   
-  cpuerrors=0
-  memerrors=0
-  hddhosterrors=0
-  hdderrors=0
-
-  i=0
-  #IFS_DEFAULT=$IFS
-  #IFS=$'\n'
-  for l in ${hosts}
+  for uhp in ${hosts}
   do
-    #IFS=$IFS_DEFAULT
-    i=$(echo "$i" + 1 | bc)
-    if [ "$l" = "" ]; then
-      continue
-    fi
-    uhp=$(echo "$l" | awk '{ print $1}')
-
-    echo "$uhp" | grep '.@.' >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
+    if [[ $uhp == ?*@?* ]]; then
       user=$(echo "$uhp" | cut -d'@' -f1)
       hostport=$(echo "$uhp" | cut -d'@' -f2)
     else
@@ -289,15 +304,14 @@ syswatch() {
       hostport=$uhp
     fi
 
-    echo "$hostport" | grep '.:.' >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
+    if [[ $hostport == ?*:?* ]]; then
       host=$(echo "$hostport" | cut -d':' -f1)
       port=$(echo "$hostport" | cut -d':' -f2)
-      hostoptions="$options -p $port"
+      hostoptions=("${sshoptions[@]}" -p "$port")
     else
       host=$hostport
       port=22
-      hostoptions=$options
+      hostoptions=("${sshoptions[@]}")
     fi
     if [ "$user" = "" ]; then
       hostuh="${host}"
@@ -316,17 +330,11 @@ syswatch() {
     sshresult=
     sshtext=
     report=0
-    #uname=
 
     hostchkcmds
 
-    sshresult=$(ssh "$hostoptions" "$hostuh" uname -a 2>&1)
-    if ! [ $? -eq 0 ]; then
-      sshfail
-    fi
-
     if [ "$sshfail" = "1" ]; then
-      debug "SSH command failure for \"$host\": ${sshtext}"
+      debug "SSH command failure for \"$host\": ${sshtext}"
     fi
 
     readfile
@@ -360,6 +368,12 @@ sshfail() {
 
 }
 
+remote() {
+  timeout "$sshtimeout" ssh "${hostoptions[@]}" "$hostuh" "$@"
+}
+
+# Find the commands on the host over one connection. The remote output is only used after checking that it looks like a path.
+
 hostchkcmds() {
 
   debug "hostchkcmds()"
@@ -368,66 +382,45 @@ hostchkcmds() {
   havedf=0
   havesar=0
 
-  sshresult=$(ssh "$hostoptions" "$hostuh" echo '$PATH' | sed 's/:/ /g')
-  if [ $? -eq 0 ] ; then
-    paths="$sshresult /opt/bin"
-  else
+  # shellcheck disable=SC2016
+  if ! sshresult=$(remote 'PATH="$PATH:/opt/bin"; for c in sar free df; do p=$(command -v "$c") && echo "$c $p"; done; echo "version $("$(command -v free)" --version 2>&1 | head -n 1)"' 2>&1); then
     sshfail
     return 1
   fi
 
-  for cmd in sar free df
+  local cmd cmdpath freepath=""
+  while read -r cmd cmdpath
   do
-
-    CMD=$(echo "$cmd" | tr /a-z/ /A-Z/)
-    found=0
-
-    for path in $paths
-    do
-      cmdpath=$path/$cmd
-
-      ssh "$hostoptions" "$hostuh" test -x "$cmdpath" >/dev/null 2>&1
-      if ! [ $? -eq 0 ] ; then
-        continue
+    if [ "$cmd" = "version" ]; then
+      if [[ $cmdpath == "free from procps"* ]] && [ -n "$freepath" ]; then
+        FREE=$freepath
+        havefree=1
       fi
-
-      if [ "$cmd" = "free" ] && ! [ "$havefree" -eq 1 ]; then
-        sshresult=$(ssh "$hostoptions" "$hostuh" "$cmdpath" --version 2>&1 | head -n1)
-        if [ $? -eq 0 ] ; then
-          echo "$sshresult" | grep "^free from procps.*$" >/dev/null 2>&1
-          if [ $? -eq 0 ] ; then
-            eval "${CMD}"="$cmdpath"
-            found=1
-            havefree=1
-            break
-          fi
-        fi
-      elif [ "$cmd" = "df" ] && ! [ "$havedf" -eq 1 ]; then
-        #sshresult=$(ssh "$hostoptions" "$hostuh" "$cmdpath" --version 2>&1 | head -n1)
-        #if [ $? -eq 0 ] ; then
-          #echo "$sshresult" | grep "^df (GNU coreutils) .*$" >/dev/null 2>&1
-          #if [ $? -eq 0 ] ; then
-            found=1
-            eval "${CMD}"="$cmdpath"
-            havedf=1
-            break
-	  #fi
-        #fi
-      elif [ "$cmd" = "sar" ] && ! [ "$havesar" -eq 1 ]; then
-        found=1
-        eval "${CMD}"="$cmdpath"
-        havesar=1
-        break
-      fi
-    done
-    if ! [ "$found" -eq 1 ]; then
-      error "Host \"$host\" Missing correct version of \"${cmd}\" command!"
+    elif ! [[ $cmdpath =~ ^/[A-Za-z0-9._/+-]+$ ]]; then
+      debug "Ignoring invalid path for \"$cmd\" on host \"$host\"."
+    elif [ "$cmd" = "sar" ]; then
+      SAR=$cmdpath
+      havesar=1
+    elif [ "$cmd" = "df" ]; then
+      DF=$cmdpath
+      havedf=1
+    elif [ "$cmd" = "free" ]; then
+      freepath=$cmdpath
     fi
+  done <<< "$sshresult"
 
-  done
-  
+  if ! [ "$havesar" -eq 1 ]; then
+    error "Host \"$host\" Missing correct version of \"sar\" command!"
+  fi
+  if ! [ "$havefree" -eq 1 ]; then
+    error "Host \"$host\" Missing correct version of \"free\" command!"
+  fi
+  if ! [ "$havedf" -eq 1 ]; then
+    error "Host \"$host\" Missing correct version of \"df\" command!"
+  fi
+
   debug "hostchkcmds() finished"
-  
+
 }
 
 # CPU LOAD
@@ -436,17 +429,17 @@ cpuload() {
 
   debug "cpuload()"
 
-  #cpufail=0
+  cpuload="?"
   cpustatus=
   cpustatus_check=
   cpuload_html=
 
   if [ "$sshfail" = "1" ]; then
-    text="SSH command failure for \"$host\": ${sshtext}"
+    text="SSH command failure for \"$host\": ${sshtext}"
     summary_add "$text"
     status "$text"
     cpuload_fail "FAIL"
-    cpuload_html="<b>CPU:</b> <font color=\"red\">${sshtext}</font>"
+    cpuload_html="<b>CPU:</b> <font color=\"red\">$(html_escape "$sshtext")</font>"
     return
   fi
   if ! [ "$havesar" -eq 1 ]; then
@@ -458,16 +451,25 @@ cpuload() {
     return
   fi
 
-  sshresult=$(ssh "$hostoptions" "$hostuh" "$SAR" -P ALL 1 2 2>&1)
-  if ! [ $? -eq 0 ]; then
-    text="SSH command failure for \"$host\": ${sshresult}"
+  if ! sshresult=$(remote env LC_ALL=C "$SAR" -P ALL 1 2 2>&1); then
+    text="SSH command failure for \"$host\": ${sshresult}"
     summary_add "$text"
     status "$text"
     cpuload_fail "FAIL"
-    cpuload_html="<b>CPU:</b> <font color=\"red\">${sshresult}</font>"
+    cpuload_html="<b>CPU:</b> <font color=\"red\">$(html_escape "$sshresult")</font>"
     return
   fi
-  cpuload=$(echo "$sshresult" | grep 'Average.*all' | awk -F" " '{print 100.0 -$NF}')
+  idle=$(echo "$sshresult" | grep 'Average.*all' | awk '{print $NF}')
+  if ! [[ $idle =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    cpuload="?"
+    text="Failed to read CPU load on \"$host\"."
+    summary_add "$text"
+    status "$text"
+    cpuload_fail "FAIL"
+    cpuload_html="<b>CPU:</b> <font color=\"red\">Failed to read CPU load.</font>"
+    return
+  fi
+  cpuload=$(awk -v idle="$idle" 'BEGIN { print 100.0 - idle }')
   if [ 1 -eq "$(echo "${cpuload} >= ${maxcpu}" | bc)" ]; then
     text="CPU threshold (${maxcpu}) exceeded for host \"$host\", CPU load is ${cpuload}."
     summary_add "$text"
@@ -475,7 +477,6 @@ cpuload() {
     cpuload_fail "ERROR"
     cpuload_html="<b>CPU:</b> <font color=\"red\">${cpuload}%</font>"
   else
-    cpufail=0
     cpustatus="OK"
     cpustatus_check="OK"
     cpufailtime=0
@@ -500,7 +501,6 @@ cpuload() {
 
 cpuload_fail() {
 
-  #cpufail=1
   if [ "$1" = "" ]; then
     cpustatus="ERROR"
   else
@@ -518,10 +518,8 @@ cpuload_fail() {
   if [ "$time" -ge "$cpufailreporttime" ]; then
     hostfail=1
     cpustatus_check=$cpustatus
-    debug "CPU failure for host \"$host\" longer than CPU fail report time $(date -u -d @$cpufailreporttime +"%T"), CPU fail time is $(date -u -d @$time +"%T")."
+    debug "CPU failure for host \"$host\" longer than CPU fail report time $(duration "$cpufailreporttime"), CPU fail time is $(duration "$time")."
   fi
-
-  cpuerrors=$(echo "$cpuerrors" + 1 | bc)
 
 }
 
@@ -535,17 +533,16 @@ memusage() {
   memstatus_check=
   memusage=0
   memtotal=0
-  #memfail=0
   used=0
   free=0
   total=0
 
   if [ "$sshfail" -eq 1 ]; then
-    text="SSH command failure for \"$host\": ${sshtext}"
+    text="SSH command failure for \"$host\": ${sshtext}"
     summary_add "$text"
     status "$text"
     memusage_fail "FAIL"
-    memusage_html="<b>Mem:</b> <font color=\"red\">${sshtext}</font>"
+    memusage_html="<b>Mem:</b> <font color=\"red\">$(html_escape "$sshtext")</font>"
     return
   fi
   if ! [ "$havefree" -eq 1 ]; then
@@ -557,33 +554,24 @@ memusage() {
     return
   fi
 
-  sshresult=$(ssh "$hostoptions" "$hostuh" "$FREE" -b 2>&1)
-  if ! [ $? -eq 0 ]; then
-    text="SSH command failure for \"$host\": ${sshresult}"
+  if ! sshresult=$(remote "$FREE" -b 2>&1); then
+    text="SSH command failure for \"$host\": ${sshresult}"
     summary_add "$text"
     status "$text"
     memusage_fail "FAIL"
-    memusage_html="<b>Mem:</b> <font color=\"red\">${sshresult}</font>"
+    memusage_html="<b>Mem:</b> <font color=\"red\">$(html_escape "$sshresult")</font>"
     return
   fi
-  #echo "$sshresult" >/tmp/debug-df-$host
 
   count=0
-  IFS_DEFAULT=$IFS
-  IFS=$'\n'
-  for l in ${sshresult}
+  while IFS= read -r l
   do
-    count=$(echo "$count" +1 | bc)
-    IFS=$IFS_DEFAULT
+    count=$(( count + 1 ))
     if [ "$l" = "" ]; then
       continue
     fi
     if [ "$count" -eq 1 ]; then
       column1=$(echo "$l" | awk '{print $1}')
-      #column2=$(echo "$l" | awk '{print $2}')
-      #column3=$(echo "$l" | awk '{print $3}')
-      #column4=$(echo "$l" | awk '{print $4}')
-      #column5=$(echo "$l" | awk '{print $5}')
       column6=$(echo "$l" | awk '{print $6}')
       continue
     fi
@@ -592,8 +580,6 @@ memusage() {
     param1=$(echo "$l" | awk '{print $2}')
     param2=$(echo "$l" | awk '{print $3}')
     param3=$(echo "$l" | awk '{print $4}')
-    #param4=$(echo "$l" | awk '{print $5}')
-    #param5=$(echo "$l" | awk '{print $6}')
     param6=$(echo "$l" | awk '{print $7}')
     
     if [ "$row" = "Mem:" ]; then
@@ -612,9 +598,9 @@ memusage() {
     else
       continue
     fi
-  done
-  
-  if ! isnum "$used" || ! isnum "$free" || ! isnum "$total"; then
+  done <<< "$sshresult"
+
+  if ! isnum "$used" || ! isnum "$free" || ! isnum "$total" || [ "$total" -le 0 ]; then
     text="Failed to calculate memory usage on \"$host\"."
     summary_add "$text"
     status "$text"
@@ -623,7 +609,7 @@ memusage() {
     return
   fi
   
-  memusage=$(echo "${used}" * 100 / "${total}" | bc)
+  memusage=$(echo "${used} * 100 / ${total}" | bc)
   memtotal=$(echo "$total" | human_print)
   if [ "$memusage" -ge "$maxmem" ]; then
     text="Memory usage threshold (${maxmem}) exceeded for host \"$host\", memory usage is ${memusage}."
@@ -656,7 +642,6 @@ memusage() {
 
 memusage_fail() {
 
-  #memfail=1
   if [ "$1" = "" ]; then
     memstatus="ERROR"
   else
@@ -674,10 +659,8 @@ memusage_fail() {
   if [ "$time" -ge "$memfailreporttime" ]; then
     hostfail=1
     memstatus_check=$memstatus
-    debug "Memory failure for host \"$host\" longer than memory failure report time $(date -u -d @$memfailreporttime +"%T"), memory failure time is $(date -u -d @$time +"%T")."
+    debug "Memory failure for host \"$host\" longer than memory failure report time $(duration "$memfailreporttime"), memory failure time is $(duration "$time")."
   fi
-  
-  memerrors=$(echo "$memerrors" + 1 | bc)
 
 }
 
@@ -694,11 +677,11 @@ hddusage() {
   hddcount=0
 
   if [ "$sshfail" -eq 1 ]; then
-    text="SSH command failure for \"$host\": ${sshtext}"
+    text="SSH command failure for \"$host\": ${sshtext}"
     summary_add "$text"
     status "$text"
     hddusage_fail "FAIL"
-    hddusage_html="<b>HDD:</b> <font color=\"red\">${sshtext}</font><br />"
+    hddusage_html="<b>HDD:</b> <font color=\"red\">$(html_escape "$sshtext")</font><br />"
     return
   fi
   if ! [ "$havedf" -eq 1 ]; then
@@ -710,35 +693,17 @@ hddusage() {
     return
   fi
 
-  sshresult=$(ssh "$hostoptions" "$hostuh" "$DF" -h 2>&1)
-  if ! [ $? -eq 0 ]; then
-    # Ignore DF command error, sometimes it returns error messages even if there are valid results.
-    text="DF command failure for \"$host\": ${sshresult}"
-    #summary_add "$text"
-    #status "$text"
-    #hddusage_fail "FAIL"
-    #hddusage_html="<b>HDD:</b> <font color=\"red\">${sshresult}</font><br />"
-    #return
-  fi
+  # Ignore the status from df, it can return an error even if there are valid results. It's a failure if none of the filesystems could be read, checked below.
+  sshresult=$(remote env LC_ALL=C "$DF" -hP 2>&1)
 
-  IFS_DEFAULT=$IFS
-  IFS=$'\n'
-  for l in ${sshresult}
+  while IFS= read -r l
   do
-    IFS=$IFS_DEFAULT
-    hddcount=$(echo "$hddcount" +1 | bc)
-    #if [ "$hddcount" -eq 1 ]; then
-      #continue
-    #fi
     if [ "$l" = "" ]; then
       continue
     fi
-    #device=$(echo "$l" | awk '{print $1}')
     total=$(echo "$l" | awk '{print $2}')
     used=$(echo "$l" | awk '{print $3}')
-    #avail=$(echo "$l" | awk '{print $4}')
     use=$(echo "$l" | awk '{print $5}' | sed 's/%//g')
-    # | tr -d %
     filesystem=$(echo "$l" | awk '{print $6}')
     
     if ! isnum "$use"; then
@@ -756,6 +721,8 @@ hddusage() {
     if [ "$found" -eq 0 ]; then
       continue
     fi
+
+    hddcount=$(( hddcount + 1 ))
 
     if [ "$use" -ge "$maxhdd" ]; then
       text="HDD usage threshold (${maxhdd}) exceeded for host \"$host\" on partition \"${filesystem}\", HDD usage is ${use}%."
@@ -786,7 +753,16 @@ hddusage() {
       fi
     fi
 
-  done
+  done <<< "$sshresult"
+
+  if [ "$hddcount" -eq 0 ]; then
+    text="Failed to read HDD usage on \"$host\": ${sshresult}"
+    summary_add "$text"
+    status "$text"
+    hddusage_fail "FAIL"
+    hddusage_html="<b>HDD:</b> <font color=\"red\">Failed to read HDD usage: $(html_escape "$sshresult")</font><br />"
+    return
+  fi
 
   if [ "$hddfail" -ne 1 ]; then
     hddfailtime=0
@@ -827,14 +803,9 @@ hddusage_fail() {
   timenow=$(date +%s)
   time=$(echo "$timenow" - "$hddfailtime" | bc)
   if [ "$time" -ge "$hddfailreporttime" ]; then
-    debug "HDD failure for host \"$host\" partition \"${filesystem}\" longer than HDD failure report time $(date -u -d @$hddfailreporttime +"%T"), HDD failure time is $(date -u -d @$time +"%T")."
+    debug "HDD failure for host \"$host\" partition \"${filesystem}\" longer than HDD failure report time $(duration "$hddfailreporttime"), HDD failure time is $(duration "$time")."
     hddstatus_check=$hddstatus
     hostfail=1
-  fi
-  
-  hdderrors=$(echo "$hdderrors" + 1 | bc)
-  if [ "$hddfail" -ne 1 ]; then
-    hddhosterrors=$(echo $hddhosterrors + 1 | bc)
   fi
 
 }
@@ -851,9 +822,8 @@ readfile() {
   hddfailtime=0
   reporttime=0
   entrytime=0
-  #changed=0
 
-  entry=$(grep -i "^${host} .*" ${tmpfile})
+  entry=$(state_get "$host")
   if [ "$entry" = "" ]; then
     debug "No entry found for \"$host\"."
     summary_add "This is the first system watch for \"$host\"."
@@ -906,7 +876,7 @@ readfile() {
   
   timenow=$(date +%s)
   time=$(echo "$timenow" - "$entrytime" | bc)
-  debug "Entry with timestamp \"${entrytime}\" ($(date -u -d @${time} +"%T") ago) found for host \"$host\". CPUPrevStatus: $cpuprevstatus CPUFailTime: $cpufailtime MemPrevStatus: $memprevstatus MemFailTime: $memfailtime HDDPrevStatus: $hddprevstatus HDDFailTime: $hddfailtime ReportTime: $reporttime."
+  debug "Entry with timestamp \"${entrytime}\" ($(duration "$time") ago) found for host \"$host\". CPUPrevStatus: $cpuprevstatus CPUFailTime: $cpufailtime MemPrevStatus: $memprevstatus MemFailTime: $memfailtime HDDPrevStatus: $hddprevstatus HDDFailTime: $hddfailtime ReportTime: $reporttime."
 
   debug "readfile() finished"
 
@@ -915,14 +885,6 @@ readfile() {
 writefile() {
 
   debug "writefile()"
-
-  # The changed state is not in use anymore, keep it here for now.
-  echo "$entry" | grep -i "^${host} CPU=${cpustatus_check} CPUFailTime=.* Mem=${memstatus_check} MemFailTime=.* HDD=${hddstatus_check} .* HDDFailTime=.* ReportTime=.* Time=.*"  >/dev/null 2>&1
-  #if [ $? -eq 0 ]; then
-  #  changed=0
-  #else
-  #  changed=1
-  #fi
 
   timenow=$(date +%s)
   reporttime_bc=$(echo "$timenow" - "$reporttime" | bc)
@@ -942,9 +904,9 @@ writefile() {
     entrytime=$(date +%s)
   fi
 
-  sed -i "/^${host} .*$/d" ${tmpfile}
+  state_remove "$host"
   timenow=$(date +%s)
-  echo "${host} CPU=${cpustatus_check} CPUFailTime=${cpufailtime} Mem=${memstatus_check} MemFailTime=${memfailtime} HDD=${hddstatus_check} ${hddstatus_line} HDDFailTime=${hddfailtime} ReportTime=${reporttime} Time=${entrytime}" >>${tmpfile}
+  echo "${host} CPU=${cpustatus_check} CPUFailTime=${cpufailtime} Mem=${memstatus_check} MemFailTime=${memfailtime} HDD=${hddstatus_check} ${hddstatus_line} HDDFailTime=${hddfailtime} ReportTime=${reporttime} Time=${entrytime}" >>"$tmpfile"
 
   syswatch="$syswatch
 Host: ${host}<br />
@@ -964,11 +926,14 @@ summary_add() {
   fi
   hostsummary=1
 
+  local text
+  text=$(html_escape "$1")
+
   if [ "$summary" = "" ]; then
-    summary="$1<br />"
+    summary="$text<br />"
   else
     summary="$summary
-    $1<br />"
+    $text<br />"
   fi
 
 }
@@ -1012,20 +977,25 @@ sendreport() {
   report_add "$syswatch"
   report_add "</p>"
   report_add "<p>"
-  report_add "Script finished in $(date -u -d @${scripttime} +"%T")<br />"
-  report_add "New report is sent if status has changed or every $(date -u -d @${reportfreq} +"%T") if there is an error.<br />"
+  report_add "Script finished in $(duration "$scripttime")<br />"
+  report_add "New report is sent if status has changed or every $(duration "$reportfreq") if there is an error.<br />"
   report_add "</p>"
   report_add "</body>"
   report_add "</html>"
 
+  read -r -a recipients <<< "$emailto"
+
   LANG=en_GB
-  EMAIL=$emailfrom mutt -e 'set content_type=text/html' -s "Monitor System Watch" $emailto <<EOT
+  if ! EMAIL=$emailfrom timeout "$mailtimeout" mutt -e 'set content_type=text/html' -s "Monitor System Watch" "${recipients[@]}" <<EOT
   $reportdata
 EOT
+  then
+    error "Failed to send report to $emailto."
+    scriptstatus=1
+  fi
 
   debug "sendreport() finished"
 
 }
 
 main "$@"
-exit_safe 0
