@@ -1,289 +1,303 @@
-#!/bin/sh
-###########################################################################
-# prename.sh - Camera Photo File Renamer
-# Copyright (C) 2006-2010 Jonas Kvinge
-###########################################################################
-# Redistributions of this source code must retain the above
-# copyright notice.
-###########################################################################
-# This program is free software; you can redistribute it and/or modify
+#!/bin/bash
+#
+# Camera Photo File Rename Script
+# Copyright (C) 2006-2026 Jonas Kvinge
+#
+# This script is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
+# the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This program is distributed in the hope that it will be useful,
+# This script is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# You should have received a copy of the GNU General Public License
+# along with this script.  If not, see <http://www.gnu.org/licenses/>.
 #
-###########################################################################
+# Redistributions of this script must retain the above copyright notice.
+
+# This script renames photos in all the subdirectories directly inside the specified directory, using the date and time from the EXIF data.
+# Photos directly in the specified directory and in deeper subdirectories are not touched, and photos without an EXIF date are reported and skipped.
 #
-# ABOUT THIS SCRIPT:
-#
-# This script renames photos in a all the subdirectories inside the
-# specified directory.
-#
-# The format is: img-subdir-xxx-widthxheight.ext
-#
-###########################################################################
+# The format is: img-yyyymmdd-hhmmss-widthxheight.ext
+# Photos with the same date, time, size and type in a directory are numbered: img-yyyymmdd-hhmmss-xxx-widthxheight.ext
 
-version="1.3.2"
+renamedirs=0
+dryrun=0
+logfile=""
 
-# Basic settings
+script=$(basename "$0")
+pdir=""
+status=0
 
-logging=0					# Log all the changes to a file so you can see what has been done.
-logfile="prename.log"				# Filename of the logfile.
-renamedirs=1					# Remove '_' and '-' from dirs.
+usage() {
+  cat <<USAGE
+Usage: $script -d <dir> [options]
 
+Options:
+  -h, --help            Show this help and exit
+  -d, --dir <dir>       Directory with a subdirectory for each album (required)
+  -n, --dry-run         Show what would be renamed without renaming anything
+  -r, --rename-dirs     Remove '_' and '-' from the album directory names
+  -l, --logfile <file>  Append all renames and errors to a file
+USAGE
+}
 
-###########################################################################
-##################### DONT CHANGE ANYTHING BELOW HERE #####################
-###########################################################################
-
-# Find out how to echo without newline
-
-c=''
-n=''
-if [ "$(eval echo -n 'a')" = "-n a" ] ; then
-  c='\c'
-else
-  n='-n'
-fi
-
-# Exit if no directory is specified.
-
-if [ "$1" = "" ] ; then
-  echo "Usage: $0 <Photo Directory>"
-  exit 1
-fi
-
-pdir="$1"
-
-# Check if the root directory is valid.
-
-if [ ! -d "$pdir" ] ; then
-  echo "ERROR: \"$pdir\" is not a directory!"
-  exit 1
-fi
-
-# See if the system has the needed commands to continue.
-
-for cmd in "which" "ls" "mkdir" "mv" "cp" "rm" "sed" "awk" "bc" "tr" "date" "identify" "convert" "mogrify"
-do
-  which $cmd >/dev/null 2>&1
-  if [ $? != 0 ] ; then
-    echo "ERROR: Missing the \"${cmd}\" command!"
+log() {
+  if [ -n "$logfile" ] && ! echo "$(date) *** $1" >> "$logfile"; then
+    echo "ERROR: Cannot write to logfile: $logfile" >&2
     exit 1
   fi
-done
+}
 
-echo "--------------------------------------------------------"
-echo "Camera Photo File Renamer v${version}"
-echo "Copyright (C) 2006-2010 Jonas Kvinge"
-echo "--------------------------------------------------------"
+error() {
+  echo "ERROR: $1" >&2
+  log "ERROR: $1"
+  status=1
+}
 
-# Function to log to file and screen
+# Rename the album directory if requested and set album to the directory to use, the old name is kept if it can't be renamed.
 
-logfile () {
+rename_album() {
 
-  if [ "$2" = 2 ] ; then
-    echo "$1"
+  local name newname newalbum
+
+  if [ "$renamedirs" -eq 0 ]; then
+    return
   fi
 
-  if [ "$logging" = "1" ] ; then
-    echo "$(date) *** $1" >>"$pdir/$logfile" || exit 1
+  name="${album##*/}"
+  newname="${name//[_-]/}"
+  if [ "$newname" = "$name" ]; then
+    return
+  fi
+
+  newalbum="$pdir/$newname"
+  if [ -z "$newname" ]; then
+    error "Cannot rename directory \"$album\", the new name would be empty."
+  elif [ -e "$newalbum" ] || [ -L "$newalbum" ]; then
+    error "Cannot rename directory \"$album\", \"$newalbum\" already exists."
+  elif [ "$dryrun" -eq 1 ]; then
+    echo "Would rename directory \"$album\" to \"$newalbum\"."
+  elif mv -n -T -- "$album" "$newalbum"; then
+    echo "Renamed directory \"$album\" to \"$newalbum\"."
+    log "Renamed directory \"$album\" to \"$newalbum\"."
+    album="$newalbum"
+  else
+    error "Cannot rename directory \"$album\"."
   fi
 
 }
 
-logfile "Script started with: $0 $*" 2
-if [ "$logging" = "1" ] ; then
-  echo "Log file stored as $pdir/$logfile"
+# Returns true if a filename in the album is in use, taking the renames of a dry run into account.
+
+name_in_use() {
+  local path="$album/$1"
+  if [ -n "${taken[$1]:-}" ]; then
+    return 0
+  fi
+  if [ -n "${freed[$1]:-}" ]; then
+    return 1
+  fi
+  [ -e "$path" ] || [ -L "$path" ]
+}
+
+rename_photo() {
+
+  local name="$1" newname="$2"
+
+  if [ "$name" = "$newname" ]; then
+    echo "No need to rename file \"$album/$name\"."
+    return
+  fi
+
+  if [ "$dryrun" -eq 1 ]; then
+    echo "Would rename \"$album/$name\" to \"$album/$newname\"."
+    taken[$newname]=1
+    freed[$name]=1
+  elif mv -n -T -- "$album/$name" "$album/$newname" && ! [ -e "$album/$name" ]; then
+    echo "Renamed \"$album/$name\" to \"$album/$newname\"."
+    log "Renamed \"$album/$name\" to \"$album/$newname\"."
+  else
+    error "Cannot rename \"$album/$name\" to \"$album/$newname\"."
+  fi
+
+}
+
+# Rename the photos in an album. All photos are read first so photos with the same date, time, size and type are known and can be numbered, photos that already have a valid number keep it so names stay stable.
+
+process_album() {
+
+  local file name extension format width height exifdate datetime number newname i
+  local -a names=() prefixes=() suffixes=() done_names=()
+  local -A groupsize=()
+  taken=()
+  freed=()
+
+  for file in "$album"/*; do
+
+    if ! [ -f "$file" ]; then
+      continue
+    fi
+
+    name="${file##*/}"
+    extension="${name##*.}"
+    extension="${extension,,}"
+    case "$extension" in
+      bmp|jpg|jpeg|gif|png|cr2|raw) ;;
+      *)
+        echo "Skipping file \"$file\", unknown image format."
+        continue
+        ;;
+    esac
+
+    format=""
+    read -r format width height exifdate < <(magick identify -quiet -ping -format '%m %w %h %[exif:DateTimeOriginal]\n' "$file" 2>/dev/null)
+    if [ -z "$format" ] || ! [[ $width =~ ^[0-9]+$ && $height =~ ^[0-9]+$ ]]; then
+      error "Cannot determine format and geometry for image: \"$file\"."
+      continue
+    fi
+
+    if ! [[ $exifdate =~ ^[0-9]{4}:[0-9]{2}:[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2} ]] || [[ $exifdate == 0000:00:00* ]]; then
+      error "Cannot determine date for image: \"$file\"."
+      continue
+    fi
+    datetime="${exifdate:0:19}"
+    datetime="${datetime//:/}"
+    datetime="${datetime/ /-}"
+
+    # The format decides the extension when it is known, RAW formats are reported differently depending on the system so they keep their extension.
+    case "$format" in
+      JPEG) extension="jpg" ;;
+      PNG) extension="png" ;;
+      GIF|GIF87) extension="gif" ;;
+      BMP|BMP2|BMP3) extension="bmp" ;;
+      *) ;;
+    esac
+
+    names+=("$name")
+    prefixes+=("img-$datetime")
+    suffixes+=("${width}x${height}.$extension")
+    groupsize["img-$datetime ${width}x${height}.$extension"]=$(( ${groupsize["img-$datetime ${width}x${height}.$extension"]:-0} + 1 ))
+
+  done
+
+  if [ ${#names[@]} -eq 0 ]; then
+    echo "No images to rename in directory \"$album\"."
+    return
+  fi
+
+  # Reserve the names that are already correct.
+
+  for i in "${!names[@]}"; do
+    done_names[i]=""
+    if [ "${groupsize["${prefixes[i]} ${suffixes[i]}"]}" -gt 1 ]; then
+      if [[ ${names[i]} =~ ^"${prefixes[i]}"-[0-9]{3,}-"${suffixes[i]}"$ ]]; then
+        done_names[i]="${names[i]}"
+      fi
+    elif [ "${names[i]}" = "${prefixes[i]}-${suffixes[i]}" ]; then
+      done_names[i]="${names[i]}"
+    fi
+    if [ -n "${done_names[i]}" ]; then
+      taken[${names[i]}]=1
+    fi
+  done
+
+  # Find a name for the rest and rename all.
+
+  for i in "${!names[@]}"; do
+
+    newname="${done_names[i]}"
+
+    if [ -z "$newname" ] && [ "${groupsize["${prefixes[i]} ${suffixes[i]}"]}" -eq 1 ]; then
+      if ! name_in_use "${prefixes[i]}-${suffixes[i]}"; then
+        newname="${prefixes[i]}-${suffixes[i]}"
+      elif [[ ${names[i]} =~ ^"${prefixes[i]}"-[0-9]{3,}-"${suffixes[i]}"$ ]]; then
+        newname="${names[i]}"
+      fi
+    fi
+
+    if [ -z "$newname" ]; then
+      number=1
+      while :; do
+        newname=$(printf '%s-%03d-%s' "${prefixes[i]}" "$number" "${suffixes[i]}")
+        if ! name_in_use "$newname"; then
+          break
+        fi
+        number=$(( number + 1 ))
+      done
+    fi
+
+    rename_photo "${names[i]}" "$newname"
+
+  done
+
+}
+
+# Parse the parameters.
+
+arguments="$*"
+parsedargs=$(getopt -o hd:nrl: -l help,dir:,dry-run,rename-dirs,logfile: -n "$script" -- "$@") || {
+  echo "ERROR: Invalid option" >&2
+  exit 1
+}
+eval set -- "$parsedargs"
+
+while true; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -d|--dir) pdir="$2"; shift 2 ;;
+    -n|--dry-run) dryrun=1; shift ;;
+    -r|--rename-dirs) renamedirs=1; shift ;;
+    -l|--logfile) logfile="$2"; shift 2 ;;
+    --) shift; break ;;
+  esac
+done
+
+if [ $# -ne 0 ]; then
+  echo "ERROR: Unexpected argument: $1" >&2
+  exit 1
 fi
 
-# Parse the photo directory.
+# Check the system and the settings.
 
-for ddir in "$pdir"/*
-do
+if [ -z "$pdir" ]; then
+  echo "ERROR: Missing required option: --dir" >&2
+  usage >&2
+  exit 1
+fi
 
-  ddir=$(echo "$ddir" | awk -F/ '{print $NF}')
+for cmd in basename date getopt magick mv realpath; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "ERROR: Missing required command: $cmd" >&2
+    exit 1
+  fi
+done
 
-  # If this is not a directory, then skip it.
-  if [ ! -d "${pdir}/${ddir}" ] ; then
+if ! [ -d "$pdir" ] || ! pdir=$(realpath -- "$pdir"); then
+  echo "ERROR: Not a directory: $pdir" >&2
+  exit 1
+fi
+
+# Rename the photos in each album.
+
+shopt -s nullglob
+declare -A taken=() freed=()
+
+log "Script started with: $0 $arguments"
+
+for album in "$pdir"/*; do
+
+  if ! [ -d "$album" ]; then
     continue
   fi
 
-  logfile "Entering directory \"$pdir/$ddir\"." 2
-
-  if [ "$renamedirs" = "1" ] ; then
-    ddirnew=$(echo "$ddir" | sed -e 's/_//g' -e 's/-//g')
-    if [ ! "$ddirnew" = "$ddir" ] ; then
-      echo $n "Renaming \"$pdir/$ddir\" to \"$pdir/$ddirnew\". $c"
-      mv "${pdir}/${ddir}" "${pdir}/${ddirnew}" || exit 1
-      echo "Done."
-      logfile "Renamed directory \"$pdir/$ddir\" to \"$pdir/$ddirnew\"." 1
-    fi
-    ddir="$ddirnew"
-  fi
-
-  image=0
-  skip=0
-  imagelist=""
-
-  # Parse the files in the album.
-
-  for imagename in "${pdir}"/"${ddir}"/*
-  do
-
-    imagename=$(echo "$imagename" | awk -F/ '{print $NF}')
-    imagenamefake=$(echo "$imagename" | sed 's/ /\:/g')
-
-    # Create the imagelist and ignore all files except for known images.
-    image=0
-    imagenamelow=$(echo "$imagename" | tr '[:upper:]' '[:lower:]')
-    case "$imagenamelow" in
-      *.bmp ) image=1;;
-      *.jpg ) image=1;;
-      *.jpeg ) image=1;;
-      *.gif ) image=1;;
-      *.png ) image=1;;
-      *.cr2 ) image=1;;
-      *.raw ) image=1;;
-      * ) image=0;;
-    esac
-    if [ "$image" = 1 ] ; then
-      if [ "$imagelist" = "" ] ; then
-        imagelist="$imagenamefake"
-      else
-        imagelist="$imagelist $imagenamefake"
-      fi
-    else
-      logfile "Skipping file \"$pdir/$ddir/$imagename\", unknown image format." 2
-    fi
-  done
-  # If Skip is set to 1 then this album is processed, continue to the next directory.
-  if [ "$skip" = "1" ] ; then
-    continue
-  fi
-  if [ "$imagelist" = "" ] ; then
-    logfile "Skipping directory \"$pdir/$ddir\", no images in directory." 2
-    continue
-  fi
-
-  # Take image by image and rename
-  
-  #if [ "$createmd5sum" = "1" ] ; then
-  #  rm "$pdir/$ddir/$ddir.md5"
-  #fi
-
-  count=0
-  for imagenamefake in $imagelist
-  do
-
-    # Set the real filename
-
-    imagename=$(echo "$imagenamefake" | sed 's/:/\ /g')
-
-    # Determine the image format and geometry for use in the filename.
-
-    #echo $n "Dermining format and geometry for image \"$pdir/$ddir/$imagename\". $c"
-    identify=$(identify "$pdir/$ddir/$imagename" | sed "s/${pdir}\/${ddir}\/${imagename} //g") || exit 1
-    if [ "$identify" = "" ] ; then
-      logfile "ERROR: Cannot determine format and geometry for image: \"$pdir/$ddir/$imagename\"." 2
-      continue
-    fi
-    format=$(echo "$identify" | awk '{print $1}') || exit 1
-    if [ "$format" = "" ] ; then
-      logfile "ERROR: Cannot determine format for image: \"$pdir/$ddir/$imagename\"." 2
-      continue
-    fi
-    extension=$(echo "$format" | tr '[:upper:]' '[:lower:]') || exit 1
-    if [ "$extension" = "" ] ; then
-      logfile "ERROR: Cannot determine extension for image: \"$pdir/$ddir/$imagename\"." 2
-      continue
-    fi
-    case "$extension" in
-      jpeg ) extension=jpg;;
-    esac
-    geometry=$(echo "$identify" | awk '{print $2}') || exit 1
-    if [ "$geometry" = "" ] ; then
-      logfile "ERROR: Cannot determine geometry for image: \"$pdir/$ddir/$imagename\"." 2
-      continue
-    fi
-
-    # Geometry can be 563x144+0+0 or 75x98
-    # we need to get rid of the plus (+) and the x characters:
-    width=$(echo "$geometry" | sed 's/[^0-9]/ /g' | awk '{print $1}') || exit 1
-    if [ "$width" = "" ] ; then
-      logfile "ERROR: Cannot determine width for image: \"$pdir/$ddir/$imagename\"." 2
-      continue
-    fi
-    height=$(echo "$geometry" | sed 's/[^0-9]/ /g' | awk '{print $2}') || exit 1
-    if [ "$height" = "" ] ; then
-      logfile "ERROR: Cannot determine height for image: \"$pdir/$ddir/$imagename\"." 2
-      continue
-    fi
-    #echo "$format $geometry"
-    
-    # Determine image date for use in filename
-    
-    #echo $n "Dermining date for image \"$pdir/$ddir/$imagename\". $c"
-    date=$(identify -format "%[exif:DateTimeOriginal]" "$pdir/$ddir/$imagename" | sed 's/\://g' | sed 's/ /-/g') || exit 1
-    if [ "$date" = "" ] ; then
-      logfile "ERROR: Cannot determine date for image: \"$pdir/$ddir/$imagename\"." 2
-      continue
-    fi
-    #echo "$date"
-    
-    # Calculate the image number for use in the filename.
-
-    count=$(echo "$count" + 1 | bc)
-    if [ "$count" -gt 999 ] ; then
-      logfile "ERROR: Directory \"$pdir/$ddir\" has more then 999 images. Skipping the rest."; 2
-      break
-    fi
-    imagenumber=$(echo "$count" | awk '{printf("%.3d", $1)}') || exit 1
-    if [ "$imagenumber" = "" ] ; then
-      logfile "ERROR: Cannot format number for image: \"$pdir/$ddir/$imagename\"."; 2
-      exit 1
-    fi
-
-    # Rename the filename.
-
-    newname="img-${date}-${imagenumber}-${width}x${height}.${extension}"
-    count2=0
-    while :
-    do
-      if [ "$imagename" = "$newname" ] ; then
-        logfile "No need to rename file \"$pdir/$ddir/$imagename\"." 2
-        break
-      fi
-      if [ -f "$pdir/$ddir/$newname" ] ; then
-        count2=$(echo "$count2" + 1 | bc)
-        imagenumber2=$(echo "$count2" | awk '{printf("%.3d", $1)}') || exit 1
-        logfile "ERROR: File \"$pdir/$ddir/$newname\" already exist, adding extra number $count2 at the end of the filename." 2
-        newname="img-${date}-${imagenumber}-${width}x${height}-${imagenumber2}.${extension}"
-        continue
-      fi
-      #echo $n "Renaming \"$pdir/$ddir/$imagename\" to \"$pdir/$ddir/$newname\". $c"
-      mv -vn "$pdir/$ddir/$imagename" "$pdir/$ddir/$newname" || exit 1
-      #echo "Done."
-      logfile "Renamed \"$pdir/$ddir/$imagename\" to \"$pdir/$ddir/$newname\"." 1
-      imagename="$newname"
-      break
-    done
-
-    #if [ "$createmd5sum" = "1" ] ; then
-    #  md5sum "$pdir/$ddir/$imagename" >>"$pdir/$ddir/$ddir.md5"
-    #fi
-
-  done
-  logfile "Leaving directory \"$pdir/$ddir\"." 2
+  echo "Entering directory \"$album\"."
+  rename_album
+  process_album
 
 done
 
-exit 0
+exit "$status"
