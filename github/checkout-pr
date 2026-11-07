@@ -1,0 +1,108 @@
+#!/bin/bash
+#
+#  checkout-pr script
+#  Copyright (C) 2026 Jonas Kvinge
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#
+# checkout-pr <PR#>
+#
+# Checks out a GitHub pull request as the local branch pr-<PR#>, rebased on the base branch of the pull request.
+# Modify and commit the changes, then run push-pr to force push the branch back to the pull request.
+# The remote of the contributor is added when it doesn't exist, named after the GitHub login, like the other remotes.
+#
+
+set -euo pipefail
+
+die() {
+  echo "checkout-pr: $*" >&2
+  exit 1
+}
+
+# Prints the remote with the GitHub repository owner/name as URL, or nothing.
+find_remote() {
+  local repo="${1,,}"
+  local remote url
+  for remote in $(git remote); do
+    url="$(git remote get-url "${remote}")"
+    url="${url,,}"
+    url="${url%.git}"
+    url="${url%/}"
+    if [[ "${url}" == *[:/]"${repo}" ]]; then
+      echo "${remote}"
+      return
+    fi
+  done
+}
+
+[ $# -eq 1 ] && [[ "$1" =~ ^[0-9]+$ ]] || die "usage: checkout-pr <PR#>"
+pr="$1"
+branch="pr-${pr}"
+
+git rev-parse --git-dir >/dev/null 2>&1 || die "not in a git repository"
+[ -z "$(git status --porcelain --untracked-files=no)" ] || die "the working tree has uncommitted changes"
+git rev-parse --verify --quiet "refs/heads/${branch}" >/dev/null && die "the branch ${branch} already exists, delete it with: git branch -D ${branch}"
+
+base_repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+# The fields are separated by the unit separator, since empty fields would be merged with tabs.
+pr_info="$(gh pr view "${pr}" --json state,isCrossRepository,maintainerCanModify,headRefName,headRepositoryOwner,headRepository,baseRefName,title --jq '[.state, .isCrossRepository, .maintainerCanModify, .headRefName, .headRepositoryOwner.login, .headRepository.name, .baseRefName, .title] | map(if . == null then "" else tostring end) | join("\u001f")')" || die "can't get pull request #${pr}"
+IFS=$'\x1f' read -r state cross_repo can_modify head_ref head_owner head_name base_ref title <<<"${pr_info}"
+
+[ -n "${head_name}" ] || die "the repository of pull request #${pr} was deleted, it can't be pushed to"
+[ "${state}" = "OPEN" ] || echo "Warning: pull request #${pr} is ${state,,}." >&2
+if [ "${cross_repo}" = "true" ] && [ "${can_modify}" != "true" ]; then
+  echo "Warning: the contributor doesn't allow edits from maintainers, push-pr will fail." >&2
+fi
+
+base_remote="$(find_remote "${base_repo}")"
+[ -n "${base_remote}" ] || die "no remote for ${base_repo}"
+
+head_remote="$(find_remote "${head_owner}/${head_name}")"
+if [ -z "${head_remote}" ]; then
+  head_remote="${head_owner}"
+  git remote get-url "${head_remote}" >/dev/null 2>&1 && die "the remote ${head_remote} exists, but isn't ${head_owner}/${head_name}"
+  echo "Adding remote ${head_remote} for ${head_owner}/${head_name}."
+  git remote add "${head_remote}" "git@github.com:${head_owner}/${head_name}.git"
+fi
+
+echo "Fetching ${head_remote}/${head_ref} and ${base_remote}/${base_ref}."
+git fetch "${head_remote}" "+refs/heads/${head_ref}:refs/remotes/${head_remote}/${head_ref}"
+git fetch "${base_remote}" "+refs/heads/${base_ref}:refs/remotes/${base_remote}/${base_ref}"
+head_oid="$(git rev-parse "refs/remotes/${head_remote}/${head_ref}")"
+
+git switch -c "${branch}" "${head_oid}"
+
+# The pull request is stored in the branch config for push-pr.
+# The head commit is pushed with a lease on it, so the commits pushed by the contributor in the meantime are never overwritten.
+git config "branch.${branch}.prNumber" "${pr}"
+git config "branch.${branch}.prRemote" "${head_remote}"
+git config "branch.${branch}.prRef" "${head_ref}"
+git config "branch.${branch}.prOid" "${head_oid}"
+git config "branch.${branch}.prBase" "${base_remote}/${base_ref}"
+
+echo
+echo "Pull request #${pr}: ${title}"
+echo "Rebasing ${branch} on ${base_remote}/${base_ref}."
+if ! git rebase "${base_remote}/${base_ref}"; then
+  echo
+  echo "Resolve the conflicts and run: git rebase --continue" >&2
+  echo "Then modify and commit the changes, and run: push-pr" >&2
+  exit 1
+fi
+
+echo
+git log --oneline "${base_remote}/${base_ref}..HEAD"
+echo
+echo "Modify and commit the changes, then run: push-pr"

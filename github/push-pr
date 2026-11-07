@@ -1,0 +1,78 @@
+#!/bin/bash
+#
+#  push-pr script
+#  Copyright (C) 2026 Jonas Kvinge
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#
+# push-pr [-y] [-n]
+#
+# Force pushes the current branch from checkout-pr back to its pull request.
+# The push is refused when the contributor pushed new commits since the branch was checked out or last pushed.
+#
+#   -y  Push without asking.
+#   -n  Dry run, only show what would be pushed.
+#
+
+set -euo pipefail
+
+die() {
+  echo "push-pr: $*" >&2
+  exit 1
+}
+
+yes=0
+dry_run=0
+while getopts "yn" opt; do
+  case "${opt}" in
+    y) yes=1 ;;
+    n) dry_run=1 ;;
+    *) die "usage: push-pr [-y] [-n]" ;;
+  esac
+done
+
+branch="$(git symbolic-ref --short -q HEAD)" || die "not on a branch"
+pr="$(git config "branch.${branch}.prNumber")" || die "the branch ${branch} wasn't checked out with checkout-pr"
+remote="$(git config "branch.${branch}.prRemote")"
+ref="$(git config "branch.${branch}.prRef")"
+oid="$(git config "branch.${branch}.prOid")"
+base="$(git config "branch.${branch}.prBase")"
+
+[ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ] && die "a rebase is in progress"
+[ -z "$(git status --porcelain --untracked-files=no)" ] || echo "Warning: the uncommitted changes are not pushed." >&2
+
+echo "Pull request #${pr}: pushing ${branch} to ${remote}/${ref}, replacing ${oid:0:10}."
+echo
+git log --oneline "${base}..HEAD"
+echo
+
+if [ "${dry_run}" -eq 1 ]; then
+  git push --dry-run --force-with-lease="refs/heads/${ref}:${oid}" "${remote}" "HEAD:refs/heads/${ref}"
+  exit 0
+fi
+
+if [ "${yes}" -eq 0 ]; then
+  read -r -p "Force push? [y/N] " answer
+  [[ "${answer}" =~ ^[Yy]$ ]] || exit 1
+fi
+
+if ! git push --force-with-lease="refs/heads/${ref}:${oid}" "${remote}" "HEAD:refs/heads/${ref}"; then
+  echo >&2
+  echo "The push failed, if the contributor pushed new commits, compare them with:" >&2
+  echo "  git fetch ${remote} ${ref} && git range-diff ${oid}...FETCH_HEAD" >&2
+  exit 1
+fi
+
+git config "branch.${branch}.prOid" "$(git rev-parse HEAD)"
